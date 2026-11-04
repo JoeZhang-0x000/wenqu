@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { setLocale, t } from '../shared/i18n.js';
 import {
+  AGENT_BACKENDS,
   MAX_ROUND_CHARS,
   MAX_SCRIPT_CHARS,
   isCollectionId,
@@ -117,7 +118,7 @@ export function createApp({ config, devOrigin }: AppOptions) {
 
   // Agents ------------------------------------------------------------------
 
-  api.get('/agents', async (_req, res) => res.json(await detectAgents()));
+  api.get('/agents', async (req, res) => res.json(await detectAgents(Boolean(req.query.refresh))));
   api.get('/agents/:backend/models', async (req, res) => res.json(await listModels(req.params.backend as AgentBackend)));
   api.post('/agents/test', json, async (req, res) => {
     const { backend, model } = req.body as { backend: AgentBackend; model?: string };
@@ -664,10 +665,11 @@ export function createApp({ config, devOrigin }: AppOptions) {
     paperId: string,
     sessionId: string,
     history: ChatMessage[],
-    body: { message: string; selection?: string; page?: number; backend?: AgentBackend; model?: string },
+    harness: AgentBackend,
+    body: { message: string; selection?: string; page?: number },
   ) => {
     const ctx = paperContext(paperId);
-    const agent = agentChoice(body);
+    const agent = agentChoice({ backend: harness });
     const user: ChatMessage = {
       role: 'user',
       content: body.message.trim(),
@@ -695,22 +697,24 @@ export function createApp({ config, devOrigin }: AppOptions) {
     return { job, message: user };
   };
 
-  api.get('/papers/:id/chats', (req, res) => res.json(vault.listChats(req.params.id)));
+  api.get('/papers/:id/chats', (req, res) => res.json(vault.listChats(req.params.id, config.get().agent.backend)));
   api.get('/papers/:id/chats/:sessionId', (req, res) => res.json(vault.getChat(req.params.id, req.params.sessionId)));
 
   /** A session is created by its first question, so an empty one never lingers in the history. */
   api.post('/papers/:id/chats', json, (req, res) => {
     if (!req.body?.message?.trim()) throw new BadRequest(t('问题不能为空'));
     paperContext(req.params.id);
-    const session = vault.createChat(req.params.id, req.body.message);
-    res.json({ sessionId: session.id, ...askInSession(req.params.id, session.id, [], req.body) });
+    const harness = (req.body.harness ?? config.get().agent.backend) as AgentBackend;
+    if (!AGENT_BACKENDS.includes(harness)) throw new BadRequest(t('未知的 Agent 后端：{backend}', { backend: String(harness) }));
+    const session = vault.createChat(req.params.id, req.body.message, harness);
+    res.json({ sessionId: session.id, ...askInSession(req.params.id, session.id, [], harness, req.body) });
   });
 
   api.post('/papers/:id/chats/:sessionId/messages', json, (req, res) => {
     if (!req.body?.message?.trim()) throw new BadRequest(t('问题不能为空'));
     const session = vault.getChat(req.params.id, req.params.sessionId);
     if (jobs.isActive(session.id)) throw new BadRequest(t('这个会话正在回答，请等它结束'));
-    res.json(askInSession(req.params.id, session.id, session.messages, req.body));
+    res.json(askInSession(req.params.id, session.id, session.messages, session.harness, req.body));
   });
 
   api.delete('/papers/:id/chats/:sessionId', (req, res) => {

@@ -1,6 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { getLocale, setLocale, t, type Locale } from '../../src/shared/i18n';
-import { isCollectionId, type Job, type Podcast, type PublicSettings, type ServerEvent } from '../../src/shared/types';
+import { isCollectionId, type AgentStatus, type Job, type Podcast, type PublicSettings, type ServerEvent } from '../../src/shared/types';
 
 export async function api<T = any>(path: string, init?: { method?: string; body?: unknown; raw?: BodyInit }): Promise<T> {
   const res = await fetch(`/api${path}`, {
@@ -110,6 +110,21 @@ export function useFetch<T>(path: string | null, deps: unknown[] = []) {
     };
   }, [path, tick, ...deps]);
   return { data, error, setData };
+}
+
+// Agent CLIs on this machine --------------------------------------------------
+
+export const agentsStore = createStore<AgentStatus[] | null>(null);
+let agentsLoading: Promise<void> | undefined;
+
+/** Starting each CLI takes a while, so the page asks once unless told to look again. */
+export function loadAgents(refresh = false): Promise<void> {
+  if (!agentsLoading || refresh) {
+    agentsLoading = api<AgentStatus[]>(`/agents${refresh ? '?refresh=1' : ''}`)
+      .then((agents) => agentsStore.set(agents))
+      .catch(fail);
+  }
+  return agentsLoading;
 }
 
 // Toasts and confirmation -----------------------------------------------------

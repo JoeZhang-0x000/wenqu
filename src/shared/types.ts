@@ -285,6 +285,8 @@ export interface ChatMessage {
 export interface ChatSessionMeta {
   id: string;
   title: string;
+  /** The agent CLI answering in this session. Chosen when it is created, then fixed. */
+  harness: AgentBackend;
   messageCount: number;
   createdAt: string;
   updatedAt: string;

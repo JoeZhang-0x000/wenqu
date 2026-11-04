@@ -5,6 +5,8 @@
  */
 const en = {
   // Chat panel
+  '会话创建后不能更换 Harness': "A chat's harness can't change after it is created",
+  '没有检测到本地 Harness，请安装 claude、codex 或 pi。': 'No local harness found. Install claude, codex or pi.',
   历史会话: 'Chat history',
   新建会话: 'New chat',
   新会话: 'New chat',

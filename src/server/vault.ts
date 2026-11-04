@@ -12,8 +12,10 @@ import {
 import { basename, join } from 'node:path';
 import { t } from '../shared/i18n.js';
 import {
+  AGENT_BACKENDS,
   COLLECTION_ID_PREFIX,
   isCollectionId,
+  type AgentBackend,
   type Blog,
   type BlogMeta,
   type ChatMessage,
@@ -396,12 +398,15 @@ export class Vault {
   }
 
   /** Earlier versions kept one conversation per paper in `chat.json`. It becomes a session. */
-  private migrateLegacyChat(paperId: string): void {
+  private migrateLegacyChat(paperId: string, fallbackHarness: AgentBackend): void {
     const legacy = join(this.paperDir(paperId), 'chat.json');
     if (!existsSync(legacy)) return;
     const messages = readJson<ChatMessage[]>(legacy);
     if (messages.length) {
-      const session = this.createChat(paperId, messages[0].content);
+      // Messages record which agent answered, as "pi" or "pi · model".
+      const label = messages.find((m) => m.agent)?.agent?.split(' ')[0] as AgentBackend | undefined;
+      const harness = label && AGENT_BACKENDS.includes(label) ? label : fallbackHarness;
+      const session = this.createChat(paperId, messages[0].content, harness);
       this.writeChat(paperId, {
         ...session,
         messages,
@@ -419,9 +424,9 @@ export class Vault {
   }
 
   /** Newest activity first. */
-  listChats(paperId: string): ChatSessionMeta[] {
+  listChats(paperId: string, fallbackHarness: AgentBackend): ChatSessionMeta[] {
     this.getPaper(paperId);
-    this.migrateLegacyChat(paperId);
+    this.migrateLegacyChat(paperId, fallbackHarness);
     const dir = this.chatsDir(paperId);
     if (!existsSync(dir)) return [];
     return readdirSync(dir)
@@ -433,12 +438,13 @@ export class Vault {
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
-  createChat(paperId: string, firstQuestion: string): ChatSession {
+  createChat(paperId: string, firstQuestion: string, harness: AgentBackend): ChatSession {
     const now = new Date().toISOString();
     const title = firstQuestion.trim().replace(/\s+/g, ' ');
     const session: ChatSession = {
       id: newOutputId(),
       title: title.length > 60 ? `${title.slice(0, 60)}…` : title,
+      harness,
       messageCount: 0,
       createdAt: now,
       updatedAt: now,

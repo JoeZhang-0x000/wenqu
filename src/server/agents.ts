@@ -181,13 +181,23 @@ function capture(command: string, args: string[], timeoutMs: number): Promise<{ 
   });
 }
 
-export async function detectAgents(): Promise<AgentStatus[]> {
-  return Promise.all(
-    AGENT_BACKENDS.map(async (backend) => {
-      const { ok, out } = await capture(backend, ['--version'], 8000);
-      return { backend, installed: ok, version: out.trim().split('\n')[0] || undefined };
-    }),
-  );
+let detected: { at: number; agents: Promise<AgentStatus[]> } | undefined;
+const DETECT_TTL_MS = 5 * 60_000;
+
+/** Which agent CLIs are on this machine. Starting them is slow, so the answer is kept for a while. */
+export function detectAgents(refresh = false): Promise<AgentStatus[]> {
+  if (!detected || refresh || Date.now() - detected.at > DETECT_TTL_MS) {
+    detected = {
+      at: Date.now(),
+      agents: Promise.all(
+        AGENT_BACKENDS.map(async (backend) => {
+          const { ok, out } = await capture(backend, ['--version'], 8000);
+          return { backend, installed: ok, version: out.trim().split('\n')[0] || undefined };
+        }),
+      ),
+    };
+  }
+  return detected.agents;
 }
 
 /** Only pi can enumerate its models; the other CLIs take a free-form model name. */

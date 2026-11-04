@@ -1,8 +1,8 @@
 import { ArrowUp, History, MessageSquare, Plus, Square, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { t } from '../../src/shared/i18n';
-import type { ChatMessage, ChatSession, ChatSessionMeta, Job } from '../../src/shared/types';
-import { api, bumpLibrary, confirmAction, fail, formatDate, jobsStore, useFetch, useStore } from './lib';
+import type { AgentBackend, ChatMessage, ChatSession, ChatSessionMeta, Job } from '../../src/shared/types';
+import { agentsStore, api, bumpLibrary, confirmAction, fail, formatDate, jobsStore, loadAgents, settingsStore, useFetch, useStore } from './lib';
 import { Markdown } from './Markdown';
 import type { SelectionAsk } from './PdfViewer';
 
@@ -12,12 +12,10 @@ export function ChatPanel({
   paperId,
   ask,
   onCite,
-  agentName,
 }: {
   paperId: string;
   ask: (SelectionAsk & { nonce: number }) | null;
   onCite(page: number): void;
-  agentName: string;
 }) {
   const { data: sessions } = useFetch<ChatSessionMeta[]>(`/papers/${paperId}/chats`);
   /** null is a new chat that doesn't exist until its first question. */
@@ -28,12 +26,24 @@ export function ChatPanel({
   const jobs = useStore(jobsStore);
   const runningJobs = useMemo(() => Object.values(jobs).filter((j) => j.kind === 'chat' && j.paperId === paperId && j.status === 'running'), [jobs, paperId]);
   const running: Job | undefined = runningJobs.find((j) => j.targetId === sessionId);
+  const settings = useStore(settingsStore)!;
+  const agents = useStore(agentsStore);
+  const installed = agents?.filter((a) => a.installed).map((a) => a.backend);
+  /** What a new chat will use. A started chat keeps the harness it was created with. */
+  const [pickedHarness, setPickedHarness] = useState<AgentBackend | null>(null);
+  const draftHarness = pickedHarness ?? (installed?.includes(settings.agent.backend) ? settings.agent.backend : installed?.[0]);
+  const sessionHarness = sessions?.find((s) => s.id === sessionId)?.harness ?? (session?.id === sessionId ? session?.harness : undefined);
+  const harness = sessionId ? sessionHarness : draftHarness;
   const [input, setInput] = useState('');
   const [quote, setQuote] = useState<{ text: string; page?: number } | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const handledAsk = useRef<number>(0);
   const messages = sessionId && session?.id === sessionId ? session.messages : [];
+
+  useEffect(() => {
+    void loadAgents();
+  }, []);
 
   // Picks up where you left off, once per paper.
   useEffect(() => {
@@ -58,7 +68,7 @@ export function ChatPanel({
         const res = await api<{ message: ChatMessage }>(`/papers/${paperId}/chats/${sessionId}/messages`, { body });
         setSession((current) => (current ? { ...current, messages: [...current.messages, res.message] } : current));
       } else {
-        const res = await api<{ sessionId: string }>(`/papers/${paperId}/chats`, { body });
+        const res = await api<{ sessionId: string }>(`/papers/${paperId}/chats`, { body: { ...body, harness: draftHarness } });
         setSessionId(res.sessionId);
       }
     } catch (err) {
@@ -107,6 +117,7 @@ export function ChatPanel({
           <History size={15} />
         </button>
         <span className="chat-title" title={title}>{showHistory ? t('历史会话') : title}</span>
+        {sessionId && !showHistory && harness && <span className="agent-pill mono" title={t('会话创建后不能更换 Harness')}>{harness}</span>}
         <button className="icon" title={t('新建会话')} onClick={startNew}><Plus size={15} /></button>
       </div>
 
@@ -125,6 +136,7 @@ export function ChatPanel({
                 <span className="history-title">{s.title}</span>
                 <span className="history-meta">
                   <MessageSquare size={11} />
+                  {s.harness} ·
                   {t('{count} 条消息', { count: s.messageCount })} · {formatDate(s.updatedAt)}
                   {runningJobs.some((j) => j.targetId === s.id) && <span className="dot live" />}
                 </span>
@@ -165,13 +177,23 @@ export function ChatPanel({
           )}
           {running && (
             <div className="msg ai">
-              {running.text ? <Markdown source={running.text} onCite={onCite} /> : <Thinking label={agentName} />}
+              {running.text ? <Markdown source={running.text} onCite={onCite} /> : <Thinking label={harness ?? 'AI'} />}
             </div>
           )}
         </div>
       )}
 
       <div className="chat-input">
+        {!sessionId && !showHistory && (
+          <div className="harness-picker">
+            <span className="muted small">Harness</span>
+            {!agents && <span className="muted small">{t('检测中')}</span>}
+            {installed?.map((id) => (
+              <button key={id} className={`chip ${draftHarness === id ? 'on' : ''}`} onClick={() => setPickedHarness(id)}>{id}</button>
+            ))}
+            {installed?.length === 0 && <span className="over small">{t('没有检测到本地 Harness，请安装 claude、codex 或 pi。')}</span>}
+          </div>
+        )}
         {quote && (
           <div className="quote-chip">
             <span>{quote.page && <b className="mono">p.{quote.page} </b>}{quote.text}</span>
@@ -182,7 +204,7 @@ export function ChatPanel({
           <textarea
             ref={inputRef}
             rows={2}
-            placeholder={quote ? t('针对这段文字提问') : t('问问 {agent}', { agent: agentName })}
+            placeholder={quote ? t('针对这段文字提问') : t('问问 {agent}', { agent: harness ?? 'AI' })}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -199,7 +221,7 @@ export function ChatPanel({
                 <Square size={13} fill="currentColor" />
               </button>
             ) : (
-              <button className="send" title={t('发送')} disabled={!input.trim()} onClick={() => send(input, quote)}>
+              <button className="send" title={t('发送')} disabled={!input.trim() || !harness} onClick={() => send(input, quote)}>
                 <ArrowUp size={16} />
               </button>
             )}

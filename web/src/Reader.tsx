@@ -163,10 +163,9 @@ export function Reader({
         <ChatDock
           ref={dockRef}
           busy={busy(['chat'])}
-          head={<button className="agent-pill mono" title={t('更换 Agent 后端')} onClick={() => onOpenSettings()}>{backend}</button>}
           notice={noText && <div className="notice err tight">{t('这份 PDF 没有可提取的文字（可能是扫描件），AI 功能暂时无法使用。')}</div>}
         >
-          <ChatPanel paperId={paperId} ask={ask} onCite={goToPage} agentName={agentName} />
+          <ChatPanel key={paperId} paperId={paperId} ask={ask} onCite={goToPage} />
         </ChatDock>
       </div>
     </div>
