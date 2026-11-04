@@ -4,6 +4,12 @@
  * type error, so a string can't ship untranslated by accident.
  */
 const en = {
+  // Chat panel
+  悬浮: 'Float',
+  停靠到侧边: 'Dock to side',
+  隐藏问答: 'Hide chat',
+  拖动调整大小: 'Drag to resize',
+
   // Library and navigation
   论文: 'Paper',
   书架: 'Library',

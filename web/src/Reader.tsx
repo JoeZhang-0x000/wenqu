@@ -3,6 +3,7 @@ import { t } from '../../src/shared/i18n';
 import { useEffect, useRef, useState } from 'react';
 import type { PaperSummary } from '../../src/shared/types';
 import { BlogPanel } from './BlogPanel';
+import { ChatDock, type ChatDockHandle } from './ChatDock';
 import { ChatPanel } from './ChatPanel';
 import { api, bumpLibrary, confirmAction, fail, jobsStore, paperHref, player, playerStore, settingsStore, toast, useFetch, useStore } from './lib';
 import { PdfViewer, type PdfHandle, type SelectionAsk } from './PdfViewer';
@@ -11,14 +12,6 @@ import { PodcastPanel } from './PodcastPanel';
 type View = 'paper' | 'blog' | 'podcast';
 
 const toView = (tab?: string): View => (tab === 'blog' || tab === 'podcast' ? tab : 'paper');
-
-const readWidth = () => {
-  try {
-    return Number(localStorage.getItem('p2p-panel-width')) || 460;
-  } catch {
-    return 460;
-  }
-};
 
 export function Reader({
   paperId,
@@ -38,10 +31,10 @@ export function Reader({
   const jobs = useStore(jobsStore);
   const [view, setViewState] = useState<View>(toView(routeTab));
   const [ask, setAsk] = useState<(SelectionAsk & { nonce: number }) | null>(null);
-  const [width, setWidth] = useState(readWidth);
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState('');
   const pdfRef = useRef<PdfHandle>(null);
+  const dockRef = useRef<ChatDockHandle>(null);
   const nonce = useRef(0);
 
   useEffect(() => {
@@ -77,30 +70,6 @@ export function Reader({
   };
   const noText = paper.textChars < 50;
   const busy = (kind: string[]) => Object.values(jobs).some((j) => j.paperId === paperId && j.status === 'running' && kind.includes(j.kind));
-
-  const startResize = (e: React.PointerEvent) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startWidth = width;
-    let latest = startWidth;
-    document.body.classList.add('resizing');
-    const move = (ev: PointerEvent) => {
-      latest = Math.min(Math.max(340, startWidth + startX - ev.clientX), window.innerWidth - 360);
-      setWidth(latest);
-    };
-    const up = () => {
-      document.body.classList.remove('resizing');
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-      try {
-        localStorage.setItem('p2p-panel-width', String(latest));
-      } catch {
-        /* A convenience only. */
-      }
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-  };
 
   return (
     <div className="reader">
@@ -171,7 +140,10 @@ export function Reader({
           url={`/api/papers/${paperId}/pdf`}
           initialPage={at}
           hidden={view !== 'paper'}
-          onAsk={(next) => setAsk({ ...next, nonce: ++nonce.current })}
+          onAsk={(next) => {
+            dockRef.current?.reveal();
+            setAsk({ ...next, nonce: ++nonce.current });
+          }}
         />
         {view === 'blog' && (
           <div className="main-view">
@@ -188,17 +160,14 @@ export function Reader({
             />
           </div>
         )}
-        <div className="splitter" onPointerDown={startResize} />
-        <aside className="side" style={{ width }}>
-          <div className="side-head">
-            <b>{t('问答')}</b>
-            {busy(['chat']) && <span className="dot live" />}
-            <div className="spacer" />
-            <button className="agent-pill mono" title={t('更换 Agent 后端')} onClick={() => onOpenSettings()}>{backend}</button>
-          </div>
-          {noText && <div className="notice err tight">{t('这份 PDF 没有可提取的文字（可能是扫描件），AI 功能暂时无法使用。')}</div>}
+        <ChatDock
+          ref={dockRef}
+          busy={busy(['chat'])}
+          head={<button className="agent-pill mono" title={t('更换 Agent 后端')} onClick={() => onOpenSettings()}>{backend}</button>}
+          notice={noText && <div className="notice err tight">{t('这份 PDF 没有可提取的文字（可能是扫描件），AI 功能暂时无法使用。')}</div>}
+        >
           <ChatPanel paperId={paperId} ask={ask} onCite={goToPage} agentName={agentName} />
-        </aside>
+        </ChatDock>
       </div>
     </div>
   );
