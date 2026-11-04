@@ -23,6 +23,7 @@ There are more papers than time to read them, and a PDF is no use on your commut
 - 💬 **Ask as you read.** Select a passage in the PDF to ask about it, explain it or translate it. Answers draw on the full text and cite page numbers, and clicking a citation takes you to that page. Each paper keeps its own chat history.
 - 🖼️ **Blog posts with the paper's figures.** Captioned figures are cropped automatically, and the agent picks which ones to use. Exported Markdown embeds its images, so one file is all you need to publish.
 - 📚 **Multi-paper collections.** Pick a few papers and make a weekly digest or a mini literature review. Citations show which paper and page each claim came from.
+- 🧭 **An assistant for the whole library.** Ask it to find related papers on arXiv, tidy up your library, or generate podcasts in a batch. It asks for your approval before it acts.
 - 🔌 **Bring your own agent.** Start a chat with Claude Code, Codex or pi, whichever is on your machine, using its existing login. Pick from the models it reports and set how hard it thinks.
 - 🌐 **English and Chinese.** The interface follows your browser's language, or you can set it in Settings. Generated content can be in English, Chinese or Japanese.
 - 🔒 **Local-first.** The server listens only on your machine, and agents run with restricted permissions to reduce the risk from malicious instructions hidden in a paper. See [Security](#security).
@@ -103,6 +104,25 @@ In the library, click **Make collection**, select 2 to 12 papers, then choose a 
 - **Weekly digest:** covers the papers one at a time, as a single episode or post.
 - **Mini review:** organizes by theme and compares methods and evidence across papers.
 
+### Assistant
+
+Open **Assistant** in the top bar. Unlike chat, which stays with one paper, the assistant can see your entire library. Try:
+
+- "Find three recent papers related to the one I added last, and add the best one."
+- "Which papers don't have a podcast yet? Write a short script for each."
+- "The authors on this paper are wrong. They should be…"
+
+Nothing happens to your library without you. Each request shows up as a card written by the app, not by the agent, listing exactly what will happen, including the old and new values of an edit. A batch needs one approval, and you can untick any part of it.
+
+| Action | Approval |
+|---|---|
+| Add, edit or delete a paper; create a collection | Always |
+| Generate a podcast or blog post; synthesize audio | Always |
+| Read your library or a paper's text | By default. You can allow it for one chat, or turn this off under **Settings → Assistant** |
+| Search arXiv | Not needed, because it changes nothing |
+
+Results from an arXiv search can also be added with their own **Add** button. The assistant can add papers from arXiv only, so use **Add paper** for local PDFs. To stop a batch, press stop in the chat, which also stops any generation it started.
+
 ## Command line
 
 ```text
@@ -141,6 +161,7 @@ The vault lives in `~/Wenqu` by default. Its contents remain usable without this
   collections/<collection-id>/
     collection.json   Name and list of papers
     blogs/  podcasts/
+  assistant/<id>.json One file per assistant conversation
   .trash/             Deleted items move here and are not permanently removed
 ```
 
@@ -170,6 +191,7 @@ Paper content is sent to the agent service you choose. When generating audio, th
 
 - **Local only.** The server listens on `127.0.0.1` and rejects requests from other Hosts and Origins, so malicious websites can't reach it through your browser.
 - **Papers are untrusted data.** A PDF may contain prompt injection, so agents run in an empty temporary directory. Claude Code and pi have all tools disabled, and Codex uses a read-only sandbox. Codex has no option to disable tools completely, so it can still read local files, but it can't write to them and has no network access by default.
+- **The assistant can only ask.** Its agent has no tools either. It writes down what it wants to do, and the server checks the request, describes it to you from the app's own data, and runs only what you approve. A paper with hidden instructions can at most put a request in front of you, so read the card before approving. Searching arXiv doesn't ask first, so a query could carry a little text from something the assistant has read; every query is shown in the chat, and it can only go to arXiv.
 - **Output is sanitized.** Agent output passes through DOMPurify before rendering, and only the app's own images load, which stops content from leaking through remote image URLs.
 - **Imports are restricted.** arXiv import only downloads from `arxiv.org`, and never fetches arbitrary URLs.
 
@@ -187,6 +209,7 @@ If you find a security issue, please contact the maintainers privately instead o
   - Agents can't see the images, so they choose and describe figures from their captions alone.
   - Extraction relies on the optional `@napi-rs/canvas` package. Where it isn't supported, blog posts have no figures.
 - **Collections:** agent scripts only, with no chat.
+- **Assistant:** finds and adds papers on arXiv only, can't add local PDFs itself, and has no notion of citations between papers, so "related" comes from keyword search. Each step starts its CLI again, so long conversations are slow and use more of your agent quota.
 
 AI-generated content can be wrong, so check it against the source before publishing. Before reusing a paper's text or figures, also confirm what its license allows.
 

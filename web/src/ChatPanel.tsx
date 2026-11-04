@@ -276,13 +276,13 @@ export function ChatPanel({
 }
 
 /** The levels a model accepts. Without a chosen model, those of the harness's default. */
-function effortsOf(agent: AgentStatus | undefined, model: string): string[] {
+export function effortsOf(agent: AgentStatus | undefined, model: string): string[] {
   if (!agent) return [];
   const found = agent.models.find((m) => m.id === (model || agent.defaultModel));
   return found ? found.efforts : agent.efforts;
 }
 
-function EffortSelect({ agent, model, value, onChange }: { agent?: AgentStatus; model: string; value: string; onChange(level: string): void }) {
+export function EffortSelect({ agent, model, value, onChange }: { agent?: AgentStatus; model: string; value: string; onChange(level: string): void }) {
   const efforts = effortsOf(agent, model);
   if (!efforts.length) return null;
   // A level set in the harness's config applies to every model.
@@ -299,7 +299,7 @@ function EffortSelect({ agent, model, value, onChange }: { agent?: AgentStatus; 
 }
 
 /** Lists what the harness reports. A model set elsewhere is kept as an option, even if it isn't listed. */
-function ModelSelect({ agent, value, onChange }: { agent?: AgentStatus; value: string; onChange(model: string): void }) {
+export function ModelSelect({ agent, value, onChange }: { agent?: AgentStatus; value: string; onChange(model: string): void }) {
   const models = agent?.models ?? [];
   return (
     <select className="model-select mono" aria-label={t('模型')} title={t('模型')} value={value} onChange={(e) => onChange(e.target.value)}>

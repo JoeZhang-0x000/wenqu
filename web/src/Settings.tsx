@@ -16,10 +16,11 @@ import {
 import { agentsStore, api, applySettings, bumpLibrary, fail, loadAgents, settingsStore, toast, useStore } from './lib';
 import { Field, Select, Switch } from './ui';
 
-type Section = 'general' | 'agent' | 'podcast' | 'blog' | 'api' | 'vault';
+type Section = 'general' | 'agent' | 'assistant' | 'podcast' | 'blog' | 'api' | 'vault';
 const sections = (): { id: Section; label: string }[] => [
   { id: 'general', label: t('通用') },
   { id: 'agent', label: t('Agent 后端') },
+  { id: 'assistant', label: t('助手') },
   { id: 'podcast', label: t('播客') },
   { id: 'blog', label: t('博客') },
   { id: 'api', label: t('语音 API') },
@@ -61,6 +62,7 @@ export function SettingsDialog({ initial, onClose }: { initial?: Section; onClos
           <button className="icon settings-close" title={t('关闭')} onClick={onClose}><X size={18} /></button>
           {section === 'general' && <GeneralSection settings={settings} />}
           {section === 'agent' && <AgentSection settings={settings} />}
+          {section === 'assistant' && <AssistantSection settings={settings} />}
           {section === 'podcast' && <PodcastSection settings={settings} />}
           {section === 'blog' && <BlogSection settings={settings} />}
           {section === 'api' && <ApiSection settings={settings} />}
@@ -68,6 +70,21 @@ export function SettingsDialog({ initial, onClose }: { initial?: Section; onClos
         </div>
       </div>
     </div>
+  );
+}
+
+function AssistantSection({ settings }: { settings: PublicSettings }) {
+  return (
+    <section>
+      <h3 className="serif">{t('助手')}</h3>
+      <p className="muted">{t('添加、修改、删除论文和生成内容，每次都要你批准，这一点不能关闭。')}</p>
+      <Switch
+        checked={settings.assistant.autoApproveReads}
+        onChange={(autoApproveReads) => save({ assistant: { autoApproveReads } })}
+        label={t('查询书架时不用询问')}
+      />
+      <p className="field-hint">{t('打开后，助手可以直接读取书架和论文全文。这些内容会发送给你选择的 Agent 服务。')}</p>
+    </section>
   );
 }
 

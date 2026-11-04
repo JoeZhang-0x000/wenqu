@@ -253,7 +253,7 @@ export function download(filename: string, content: string, type = 'text/markdow
 // Routing ---------------------------------------------------------------------
 
 export interface Route {
-  page: 'library' | 'works' | 'paper' | 'collections' | 'collection';
+  page: 'library' | 'works' | 'paper' | 'collections' | 'collection' | 'assistant';
   id?: string;
   tab?: string;
   item?: string;
@@ -270,6 +270,7 @@ function parseHash(): Route {
   if (head === 'collection' && id) return { page: 'collection', ...detail };
   if (head === 'collections') return { page: 'collections' };
   if (head === 'works') return { page: 'works' };
+  if (head === 'assistant') return { page: 'assistant', id };
   return { page: 'library' };
 }
 

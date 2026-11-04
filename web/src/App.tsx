@@ -1,7 +1,9 @@
 import { Loader2, Moon, Settings as SettingsIcon, Sun, X } from 'lucide-react';
 import { t } from '../../src/shared/i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { api, confirmStore, connectEvents, fail, jobsStore, localeStore, refreshSettings, routeStore, settingsStore, toastStore, useStore } from './lib';
+import type { AssistantSessionMeta } from '../../src/shared/types';
+import { Assistant } from './Assistant';
+import { api, confirmStore, connectEvents, fail, jobsStore, localeStore, refreshSettings, routeStore, settingsStore, toastStore, useFetch, useStore } from './lib';
 import { CollectionView, Collections } from './Collections';
 import { AddPaperDialog, importFiles } from './AddPaper';
 import { Library } from './Library';
@@ -74,6 +76,7 @@ export function App() {
           <a className={route.page === 'library' ? 'on' : ''} href="#/">{t('书架')}</a>
           <a className={route.page === 'collections' || route.page === 'collection' ? 'on' : ''} href="#/collections">{t('合集')}</a>
           <a className={route.page === 'works' ? 'on' : ''} href="#/works">{t('作品')}</a>
+          <AssistantLink active={route.page === 'assistant'} />
         </nav>
         <div className="spacer" />
         <Activity />
@@ -87,6 +90,7 @@ export function App() {
         {route.page === 'library' && <Library />}
         {route.page === 'works' && <Works />}
         {route.page === 'collections' && <Collections />}
+        {route.page === 'assistant' && <Assistant sessionId={route.id} />}
         {route.page === 'paper' && route.id && (
           <Reader
             key={route.id}
@@ -121,9 +125,21 @@ export function App() {
   );
 }
 
+/** The assistant works in the background, so a request for approval has to be visible from anywhere. */
+function AssistantLink({ active }: { active: boolean }) {
+  const { data: sessions } = useFetch<AssistantSessionMeta[]>('/assistant/sessions');
+  const waiting = sessions?.find((s) => s.pending > 0);
+  return (
+    <a className={active ? 'on' : ''} href={waiting ? `#/assistant/${waiting.id}` : '#/assistant'} title={waiting ? t('有操作等待你批准') : undefined}>
+      {t('助手')}
+      {waiting && <span className="dot nav-dot" aria-label={t('有操作等待你批准')} />}
+    </a>
+  );
+}
+
 function Activity() {
   const jobs = useStore(jobsStore);
-  const running = useMemo(() => Object.values(jobs).filter((j) => j.status === 'running' && j.kind !== 'chat'), [jobs]);
+  const running = useMemo(() => Object.values(jobs).filter((j) => j.status === 'running' && j.kind !== 'chat' && j.kind !== 'assistant'), [jobs]);
   const [open, setOpen] = useState(false);
   useEffect(() => {
     if (!running.length) setOpen(false);

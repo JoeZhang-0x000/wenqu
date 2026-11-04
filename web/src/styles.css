@@ -521,6 +521,49 @@ input[type='range'] { width: 100%; accent-color: var(--signal); }
   .wave i, .spin, .pulse, .dot.live { animation: none; }
 }
 
+/* Assistant */
+.assistant { display: flex; height: 100%; min-height: 0; }
+.assistant-side { flex: none; width: 260px; display: flex; flex-direction: column; min-height: 0; padding: 12px 8px 8px; border-right: 1px solid var(--line); }
+.assistant-new { justify-content: center; margin: 0 4px 8px; text-decoration: none; }
+.assistant-side .history-open { text-decoration: none; display: block; }
+.assistant-side .history-meta { flex-wrap: wrap; }
+.assistant-badge { margin-left: 4px; padding: 0 6px; border-radius: 9px; background: var(--signal); color: var(--signal-ink); font-size: 10.5px; }
+.assistant-main { min-width: 0; }
+.assistant-column { width: min(760px, 100%); margin: 0 auto; }
+.assistant-main .chat-log > .assistant-column { display: flex; flex-direction: column; gap: 14px; flex: 1; }
+.assistant-main .prose a { color: var(--signal); }
+.actions { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.action-row { display: flex; align-items: flex-start; gap: 7px; padding: 4px 8px; border-radius: 7px; background: var(--paper-3); font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
+.action-row > svg { flex: none; margin-top: 3px; }
+.action-row a { color: inherit; }
+.action-row .ok { color: var(--ok); }
+.action-row.rejected .grow, .action-row.canceled .grow { color: var(--ink-3); }
+.action-note { color: var(--ink-3); }
+.action-hits > summary { list-style: none; cursor: pointer; }
+.action-hits > summary::-webkit-details-marker { display: none; }
+.action-chevron { transition: transform 0.12s; }
+.action-hits[open] .action-chevron { transform: rotate(90deg); }
+.action-hits ul { list-style: none; margin: 4px 0 2px; padding: 0 0 0 8px; }
+.hit { display: flex; align-items: flex-start; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); }
+.hit:last-child { border-bottom: 0; }
+.hit a.serif { line-height: 1.35; text-decoration: none; display: block; }
+.hit a.serif:hover { color: var(--signal); }
+.hit .btn { flex: none; display: inline-flex; align-items: center; gap: 3px; text-decoration: none; }
+.approval { margin-top: 6px; padding: 10px 12px; border: 1px solid var(--signal); border-radius: 10px; background: var(--paper-2); }
+.approval-head { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; color: var(--signal); }
+.approval-list { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 45vh; overflow-y: auto; }
+.approval-item { display: flex; align-items: flex-start; gap: 8px; }
+.approval-item b { font-weight: 500; overflow-wrap: anywhere; }
+.approval-item input { flex: none; margin-top: 4px; accent-color: var(--signal); }
+.approval-list li.danger b { color: var(--bad); }
+.action-details { margin: 3px 0 0; font-size: 12px; color: var(--ink-2); }
+.action-details > div { display: flex; gap: 8px; }
+.action-details dt { flex: none; color: var(--ink-3); }
+.action-details dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.action-details del { color: var(--ink-3); }
+.approval-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.nav-dot { position: relative; display: inline-block; margin-left: 5px; vertical-align: middle; }
+
 /* Podcast */
 .episode { display: flex; align-items: center; gap: 13px; margin-bottom: 16px; }
 .episode h3 { font-size: 18px; font-weight: 600; line-height: 1.28; }
@@ -660,6 +703,11 @@ a.import-title:hover { color: var(--signal); }
   .reader-title { max-width: none; flex: 1; }
   .work { grid-template-columns: 34px minmax(0, 1fr) auto; }
   .work-tag, .work-date { display: none; }
+  .top-nav { flex: 0 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .top-nav a { flex: none; }
+  .brand { flex: none; margin-right: 6px; }
+  .assistant { flex-direction: column; }
+  .assistant-side { width: 100%; max-height: 30%; border-right: 0; border-bottom: 1px solid var(--line); }
   .settings { flex-direction: column; height: 100%; }
   .settings-nav { width: 100%; flex-direction: row; flex-wrap: wrap; padding: 10px; border-right: 0; border-bottom: 1px solid var(--line); }
   .settings-nav h2 { width: 100%; padding: 0 6px 6px; }

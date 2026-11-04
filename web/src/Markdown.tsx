@@ -88,6 +88,8 @@ export const Markdown = memo(function Markdown({
           return;
         }
         const link = target.closest('a') as HTMLAnchorElement | null;
+        // A link within the app, such as the assistant naming a paper in the library.
+        if (link?.getAttribute('href')?.startsWith('#/')) return;
         if (link?.href && !link.classList.contains('cite')) {
           e.preventDefault();
           window.open(link.href, '_blank', 'noopener');
