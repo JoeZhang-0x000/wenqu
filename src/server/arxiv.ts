@@ -1,5 +1,5 @@
 import { t } from '../shared/i18n.js';
-import type { PaperMeta } from '../shared/types.js';
+import type { ArxivLookup, ArxivMeta } from '../shared/types.js';
 import type { Vault } from './vault.js';
 
 const USER_AGENT = 'wenqu/0.1';
@@ -40,12 +40,7 @@ const decodeXml = (text: string) =>
 const tag = (xml: string, name: string) => xml.match(new RegExp(`<${name}\\b[^>]*>([\\s\\S]*?)</${name}>`))?.[1];
 const clean = (text: string | undefined) => (text === undefined ? undefined : decodeXml(text).replace(/\s+/g, ' ').trim());
 
-export type ArxivMeta = Required<Pick<PaperMeta, 'title' | 'authors' | 'arxivId'>> & Pick<PaperMeta, 'year' | 'abstract'>;
-
-/** Parses one entry from the arXiv Atom API. Returns null if the feed has none. */
-export function parseArxivFeed(xml: string): ArxivMeta | null {
-  const entry = tag(xml, 'entry');
-  if (!entry) return null;
+function parseEntry(entry: string): ArxivMeta | null {
   const title = clean(tag(entry, 'title'));
   const arxivId = clean(tag(entry, 'id'))?.match(/abs\/(.+)$/)?.[1];
   if (!title || !arxivId) return null;
@@ -60,6 +55,16 @@ export function parseArxivFeed(xml: string): ArxivMeta | null {
     abstract: clean(tag(entry, 'summary')),
     year: published ? Number(published.slice(0, 4)) || undefined : undefined,
   };
+}
+
+/** Parses every entry in an arXiv Atom feed. */
+export function parseArxivEntries(xml: string): ArxivMeta[] {
+  return [...xml.matchAll(/<entry\b[^>]*>([\s\S]*?)<\/entry>/g)].map((m) => parseEntry(m[1])).filter((e): e is ArxivMeta => Boolean(e));
+}
+
+/** Parses one entry from the arXiv Atom API. Returns null if the feed has none. */
+export function parseArxivFeed(xml: string): ArxivMeta | null {
+  return parseArxivEntries(xml)[0] ?? null;
 }
 
 async function request(url: string, signal?: AbortSignal): Promise<Response> {
@@ -94,6 +99,36 @@ async function fetchPdf(id: string): Promise<Buffer> {
     chunks.push(Buffer.from(chunk));
   }
   return Buffer.concat(chunks);
+}
+
+const withoutVersion = (id: string) => id.replace(/v\d+$/, '');
+
+/**
+ * What each input refers to, before anything is downloaded. The metadata is only a
+ * preview, so when arXiv can't be reached the ids still come back and can be imported.
+ */
+export async function lookupArxiv(vault: Vault, inputs: string[]): Promise<ArxivLookup[]> {
+  const results: ArxivLookup[] = inputs.map((input) => {
+    const id = parseArxivInput(input);
+    return { input, id, paperId: id ? vault.findArxiv(id)?.id : undefined, status: id ? 'unknown' : 'invalid' };
+  });
+  const ids = [...new Set(results.flatMap((r) => (r.id ? [r.id] : [])))];
+  if (!ids.length) return results;
+  try {
+    const res = await request(`https://export.arxiv.org/api/query?id_list=${ids.map(encodeURIComponent).join(',')}&max_results=${ids.length}`);
+    if (!res.ok) return results;
+    const entries = parseArxivEntries(await res.text());
+    for (const result of results) {
+      if (!result.id) continue;
+      const base = withoutVersion(result.id);
+      const entry = entries.find((e) => withoutVersion(e.arxivId) === base);
+      result.status = entry ? 'found' : 'missing';
+      if (entry) result.meta = entry;
+    }
+  } catch {
+    /* Only the preview is lost. */
+  }
+  return results;
 }
 
 export async function importArxiv(vault: Vault, input: string) {

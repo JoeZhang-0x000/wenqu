@@ -22,7 +22,7 @@ import {
 } from '../shared/types.js';
 import { runAgent } from './agents.js';
 import { detectAgents } from './harness.js';
-import { importArxiv } from './arxiv.js';
+import { importArxiv, lookupArxiv } from './arxiv.js';
 import { Config, expandHome } from './config.js';
 import { DoubaoError, synthesizePodcast } from './doubao.js';
 import { FIGURES_VERSION, extractFigures, figurePath, figuresSupported, inlineFigures, keepKnownFigures } from './figures.js';
@@ -38,6 +38,7 @@ const MAX_PAPER_CHARS = 150_000;
 const MAX_DIRECT_INPUT = 20_000;
 const MAX_PDF_BYTES = 200 * 1024 * 1024;
 const MAX_COLLECTION_PAPERS = 12;
+const MAX_ARXIV_LOOKUP = 50;
 
 const webRoot = () => {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -200,6 +201,13 @@ export function createApp({ config, devOrigin }: AppOptions) {
       res.json({ paper: vault.getPaper(meta.id), duplicate });
     },
   );
+
+  /** Tells the add-paper dialog what was pasted, before anything is downloaded. */
+  api.post('/papers/arxiv/lookup', json, async (req, res) => {
+    const inputs = req.body?.inputs;
+    if (!Array.isArray(inputs) || inputs.length > MAX_ARXIV_LOOKUP) throw new BadRequest(t('一次最多添加 {count} 篇', { count: MAX_ARXIV_LOOKUP }));
+    res.json(await lookupArxiv(vault, inputs.map(String)));
+  });
 
   api.post('/papers/arxiv', json, async (req, res) => {
     const { meta, duplicate } = await importArxiv(vault, String(req.body?.input ?? '')).catch((err: Error) => {

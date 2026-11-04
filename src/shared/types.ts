@@ -176,6 +176,19 @@ export interface PaperMeta {
   textChars: number;
 }
 
+export type ArxivMeta = Required<Pick<PaperMeta, 'title' | 'authors' | 'arxivId'>> & Pick<PaperMeta, 'year' | 'abstract'>;
+
+export interface ArxivLookup {
+  input: string;
+  /** The arXiv id this input names, or null if it doesn't name one. */
+  id: string | null;
+  /** `unknown` means arXiv couldn't be asked, which doesn't stop an import. */
+  status: 'invalid' | 'found' | 'missing' | 'unknown';
+  meta?: ArxivMeta;
+  /** Set when the paper is already in the vault. */
+  paperId?: string;
+}
+
 export interface PaperSummary extends PaperMeta {
   blogCount: number;
   podcastCount: number;

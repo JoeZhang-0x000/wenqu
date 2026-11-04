@@ -1,26 +1,10 @@
-import { AudioLines, Check, FileText, Layers, Link2, Loader2, Plus, Search, Upload } from 'lucide-react';
+import { AudioLines, Check, FileText, Layers, Link2, Plus, Search, Upload } from 'lucide-react';
 import { getLocale, t } from '../../src/shared/i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PaperSummary } from '../../src/shared/types';
-import { api, bumpLibrary, fail, paperHref, toast, useFetch } from './lib';
+import { openAddPaper } from './AddPaper';
+import { api, fail, paperHref, useFetch } from './lib';
 import { renderThumb } from './pdf';
-
-export async function importFiles(files: File[]) {
-  const pdfs = files.filter((f) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'));
-  if (!pdfs.length) {
-    toast(t('只支持 PDF 文件'), 'error');
-    return;
-  }
-  for (const file of pdfs) {
-    try {
-      const res = await api<{ paper: PaperSummary; duplicate: boolean }>(`/papers?filename=${encodeURIComponent(file.name)}`, { raw: file });
-      toast(res.duplicate ? t('已经在库里：{title}', { title: res.paper.title }) : t('已导入：{title}', { title: res.paper.title }));
-    } catch (err) {
-      fail(new Error(`${file.name}：${(err as Error).message}`));
-    }
-  }
-  bumpLibrary();
-}
 
 const VERSE = '问渠哪得清如许？为有源头活水来。';
 
@@ -31,45 +15,6 @@ function Motto() {
       {getLocale() !== 'zh' && <p className="motto-gloss">How can the water run so clear? Because fresh water keeps flowing from its source.</p>}
       <figcaption>{t('朱熹《观书有感》')}</figcaption>
     </figure>
-  );
-}
-
-/** Accepts an arXiv link or id. */
-function ArxivImport({ autoFocus }: { autoFocus?: boolean }) {
-  const [value, setValue] = useState('');
-  const [busy, setBusy] = useState(false);
-  const submit = async () => {
-    if (!value.trim() || busy) return;
-    setBusy(true);
-    try {
-      const res = await api<{ paper: PaperSummary; duplicate: boolean }>('/papers/arxiv', { body: { input: value } });
-      toast(res.duplicate ? t('已经在库里：{title}', { title: res.paper.title }) : t('已导入：{title}', { title: res.paper.title }));
-      setValue('');
-      bumpLibrary();
-    } catch (err) {
-      fail(err);
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <form
-      className="search arxiv"
-      onSubmit={(e) => {
-        e.preventDefault();
-        void submit();
-      }}
-    >
-      {busy ? <Loader2 size={14} className="spin" /> : <Link2 size={14} />}
-      <input
-        autoFocus={autoFocus}
-        disabled={busy}
-        aria-label={t('arXiv 链接或编号')}
-        placeholder={busy ? t('正在从 arXiv 下载') : t('粘贴 arXiv 链接或编号，回车导入')}
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-      />
-    </form>
   );
 }
 
@@ -87,7 +32,6 @@ export function Library() {
   const [filter, setFilter] = useState<Filter>('all');
   const [selected, setSelected] = useState<string[] | null>(null);
   const [collectionTitle, setCollectionTitle] = useState('');
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -99,38 +43,24 @@ export function Library() {
     });
   }, [papers, query, filter]);
 
-  const picker = (
-    <input
-      ref={fileRef}
-      type="file"
-      accept="application/pdf,.pdf"
-      multiple
-      hidden
-      onChange={(e) => {
-        void importFiles([...(e.target.files ?? [])]);
-        e.target.value = '';
-      }}
-    />
-  );
-
   if (papers && !papers.length) {
     return (
       <div className="page">
-        {picker}
         <Motto />
-        <button className="empty-drop" onClick={() => fileRef.current?.click()}>
+        <button className="empty-drop" onClick={() => openAddPaper('file')}>
           <Upload size={26} strokeWidth={1.5} />
           <span className="serif">{t('把第一篇论文拖进来')}</span>
           <span className="muted">{t('或者点击选择 PDF。也可以在终端运行')} <code>wenqu add paper.pdf</code></span>
         </button>
-        <div className="empty-arxiv"><ArxivImport /></div>
+        <div className="empty-arxiv">
+          <button className="btn" onClick={() => openAddPaper('link')}><Link2 size={14} />{t('用 arXiv 链接添加')}</button>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="page">
-      {picker}
       <Motto />
       <header className="page-head">
         <h1 className="serif">{t('书架')}</h1>
@@ -140,7 +70,6 @@ export function Library() {
           <Search size={14} />
           <input placeholder={t('搜索标题、作者、摘要')} value={query} onChange={(e) => setQuery(e.target.value)} />
         </div>
-        <ArxivImport />
         <button
           className={`btn ${selected ? 'on' : ''}`}
           disabled={(papers?.length ?? 0) < 2}
@@ -153,7 +82,7 @@ export function Library() {
         >
           <Layers size={14} />{t('做合集')}
         </button>
-        <button className="btn primary" onClick={() => fileRef.current?.click()}><Plus size={15} />{t('添加论文')}</button>
+        <button className="btn primary" onClick={() => openAddPaper()}><Plus size={15} />{t('添加论文')}</button>
       </header>
       <div className="chips filters">
         {filters().map((f) => (

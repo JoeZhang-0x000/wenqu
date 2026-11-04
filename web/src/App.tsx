@@ -3,7 +3,8 @@ import { t } from '../../src/shared/i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, confirmStore, connectEvents, fail, jobsStore, localeStore, refreshSettings, routeStore, settingsStore, toastStore, useStore } from './lib';
 import { CollectionView, Collections } from './Collections';
-import { importFiles, Library } from './Library';
+import { AddPaperDialog, importFiles } from './AddPaper';
+import { Library } from './Library';
 import { Player } from './Player';
 import { Reader } from './Reader';
 import { SettingsDialog } from './Settings';
@@ -108,6 +109,7 @@ export function App() {
       </main>
       <Player />
       {settingsOpen && <SettingsDialog initial={settingsOpen.section} onClose={() => setSettingsOpen(false)} />}
+      <AddPaperDialog />
       {dragging && (
         <div className="drop-veil">
           <span className="serif">{t('松手，把论文放进书架')}</span>
