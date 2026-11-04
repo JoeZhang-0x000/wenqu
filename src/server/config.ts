@@ -43,6 +43,7 @@ export function defaultSettings(): Settings {
       tailMusic: false,
     },
     blog: { language: getLocale(), style: 'explainer', customStyle: '' },
+    assistant: { autoApproveReads: false },
     doubao: { apiKey: '', resourceId: DOUBAO_RESOURCE_ID },
   };
 }
@@ -59,6 +60,7 @@ function merge(base: Settings, patch: SettingsPatch): Settings {
     },
     podcast: { ...base.podcast, ...patch.podcast },
     blog: { ...base.blog, ...patch.blog },
+    assistant: { ...base.assistant, ...patch.assistant },
     doubao: { ...base.doubao, ...patch.doubao },
   };
 }

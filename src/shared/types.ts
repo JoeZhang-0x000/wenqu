@@ -32,6 +32,10 @@ export interface Settings {
     style: string;
     customStyle: string;
   };
+  assistant: {
+    /** Lets the assistant read the library without asking. Changes always need approval. */
+    autoApproveReads: boolean;
+  };
   doubao: {
     apiKey: string;
     resourceId: string;
@@ -54,6 +58,7 @@ export interface SettingsPatch {
   agent?: Partial<Settings['agent']>;
   podcast?: Partial<Settings['podcast']>;
   blog?: Partial<Settings['blog']>;
+  assistant?: Partial<Settings['assistant']>;
   doubao?: Partial<Settings['doubao']>;
 }
 
@@ -297,6 +302,65 @@ export interface ChatMessage {
   at: string;
 }
 
+/** A paper found on arXiv. `paperId` is set when it is already in the vault. */
+export interface ArxivHit extends ArxivMeta {
+  paperId?: string;
+}
+
+/**
+ * `read` looks at the library, `write` changes it, and `external` only asks arXiv.
+ * Whether an action waits for the user follows from this, never from the agent.
+ */
+export type AssistantAccess = 'read' | 'write' | 'external';
+export type AssistantActionStatus = 'pending' | 'approved' | 'running' | 'done' | 'failed' | 'rejected' | 'canceled';
+
+export interface AssistantAction {
+  id: string;
+  tool: string;
+  /** Validated and normalized. This is exactly what runs if approved. */
+  args: Record<string, unknown>;
+  access: AssistantAccess;
+  /** Written by the server from `args`, so the agent can't misdescribe what it asks for. */
+  summary: string;
+  details?: { label: string; value: string; before?: string }[];
+  status: AssistantActionStatus;
+  /** What the agent is told happened. */
+  result?: string;
+  /** What the user is told happened, when it adds to the summary. */
+  note?: string;
+  hits?: ArxivHit[];
+  /** What this produced or refers to, for a link. */
+  target?: { ownerId: string; tab?: 'blog' | 'podcast'; item?: string };
+}
+
+export interface AssistantMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  actions?: AssistantAction[];
+  agent?: string;
+  error?: boolean;
+  at: string;
+}
+
+export interface AssistantSessionMeta {
+  id: string;
+  title: string;
+  harness: AgentBackend;
+  model: string;
+  thinking: string;
+  messageCount: number;
+  /** Actions waiting for the user. */
+  pending: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AssistantSession extends Omit<AssistantSessionMeta, 'pending'> {
+  /** The user chose to stop being asked about reads in this chat. */
+  allowReads: boolean;
+  messages: AssistantMessage[];
+}
+
 export interface ChatSessionMeta {
   id: string;
   title: string;
@@ -315,7 +379,7 @@ export interface ChatSession extends ChatSessionMeta {
   messages: ChatMessage[];
 }
 
-export type JobKind = 'blog' | 'script' | 'synth' | 'chat';
+export type JobKind = 'blog' | 'script' | 'synth' | 'chat' | 'assistant';
 export type JobStatus = 'running' | 'done' | 'failed' | 'canceled';
 
 export interface Job {

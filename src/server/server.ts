@@ -22,7 +22,7 @@ import {
 } from '../shared/types.js';
 import { runAgent } from './agents.js';
 import { detectAgents } from './harness.js';
-import { importArxiv, lookupArxiv } from './arxiv.js';
+import { importArxiv, lookupArxiv, searchArxiv } from './arxiv.js';
 import { Config, expandHome } from './config.js';
 import { DoubaoError, synthesizePodcast } from './doubao.js';
 import { FIGURES_VERSION, extractFigures, figurePath, figuresSupported, inlineFigures, keepKnownFigures } from './figures.js';
@@ -30,7 +30,8 @@ import { Jobs } from './jobs.js';
 import { PDFJS_DIR, pageMarkedText } from './pdf.js';
 import { blogPrompt, chatPrompt, collectionSource, paperSource, scriptPrompt, type SourceFigure } from './prompts.js';
 import { parseScript } from './script.js';
-import { NotFound, Vault, newOutputId } from './vault.js';
+import { Assistant } from './assistant.js';
+import { BadRequest, NotFound, Vault, newOutputId } from './vault.js';
 
 /** Enough for almost any paper while keeping the agent call responsive. */
 const MAX_PAPER_CHARS = 150_000;
@@ -368,14 +369,15 @@ export function createApp({ config, devOrigin }: AppOptions) {
   api.get('/papers/:id/blogs', (req, res) => res.json(vault.listBlogs(req.params.id)));
   api.get('/papers/:id/blogs/:blogId', (req, res) => res.json(vault.getBlog(req.params.id, req.params.blogId)));
 
-  api.post('/papers/:id/blogs', json, (req, res) => {
-    const paperId = req.params.id;
+  api.post('/papers/:id/blogs', json, (req, res) => res.json(startBlog(req.params.id, req.body ?? {})));
+
+  function startBlog(paperId: string, body: Record<string, any>) {
     const defaults = config.get().blog;
-    const { style = defaults.style, language = defaults.language, instructions, mode = 'digest' } = req.body ?? {};
-    const customStyle = req.body?.customStyle ?? defaults.customStyle;
-    const withFigures = req.body?.figures !== false;
+    const { style = defaults.style, language = defaults.language, instructions, mode = 'digest' } = body;
+    const customStyle = body.customStyle ?? defaults.customStyle;
+    const withFigures = body.figures !== false;
     const title = validateOwner(paperId);
-    const agent = agentChoice(req.body ?? {});
+    const agent = agentChoice(body);
     const blogId = newOutputId();
     const job = jobs.start({ kind: 'blog', paperId, label: t('博客：{title}', { title }), targetId: blogId }, async ({ signal, delta, progress }) => {
       if (withFigures) progress({ done: 0, note: t('正在提取论文图表') });
@@ -403,8 +405,8 @@ export function createApp({ config, devOrigin }: AppOptions) {
         chars: markdown.length,
       });
     });
-    res.json({ job, blogId });
-  });
+    return { job, blogId };
+  }
 
   /** A single Markdown file with its figures embedded, ready to publish elsewhere. */
   api.get('/papers/:id/blogs/:blogId/export', (req, res) => {
@@ -454,10 +456,10 @@ export function createApp({ config, devOrigin }: AppOptions) {
     res.json(withLive(vault.getPodcast(req.params.id, req.params.podcastId))),
   );
 
-  api.post('/papers/:id/podcasts', json, (req, res) => {
-    const paperId = req.params.id;
+  api.post('/papers/:id/podcasts', json, (req, res) => res.json(startPodcast(req.params.id, req.body ?? {})));
+
+  function startPodcast(paperId: string, body: Record<string, any>) {
     const defaults = config.get().podcast;
-    const body = req.body ?? {};
     const options = {
       style: body.style ?? defaults.style,
       customStyle: body.customStyle ?? defaults.customStyle,
@@ -502,8 +504,7 @@ export function createApp({ config, devOrigin }: AppOptions) {
         input_text: inputText,
         input_info: { input_text_max_length: MAX_DIRECT_INPUT },
       });
-      res.json({ job, podcastId: podcast.id });
-      return;
+      return { job, podcastId: podcast.id };
     }
 
     const agent = agentChoice(body);
@@ -527,8 +528,8 @@ export function createApp({ config, devOrigin }: AppOptions) {
         }
       },
     );
-    res.json({ job, podcastId: podcast.id });
-  });
+    return { job, podcastId: podcast.id };
+  }
 
   /** Why a script cannot be sent to Doubao, or null when it can. */
   const scriptIssue = (rounds: ScriptRound[]): string | null => {
@@ -645,13 +646,17 @@ export function createApp({ config, devOrigin }: AppOptions) {
   });
 
   api.post('/papers/:id/podcasts/:podcastId/synthesize', (req, res) => {
+    res.json({ job: synthesizeScript(req.params.id, req.params.podcastId) });
+  });
+
+  function synthesizeScript(ownerId: string, podcastId: string) {
     requireApiKey();
-    const podcast = vault.getPodcast(req.params.id, req.params.podcastId);
+    const podcast = vault.getPodcast(ownerId, podcastId);
     if (jobs.isActive(podcast.id)) throw new BadRequest(t('这期播客正在处理中'));
     const issue = scriptIssue(podcast.rounds);
     if (issue) throw new BadRequest(issue);
-    res.json({ job: startSynthesis(req.params.id, podcast, scriptPayload(podcast)) });
-  });
+    return startSynthesis(ownerId, podcast, scriptPayload(podcast));
+  }
 
   api.delete('/papers/:id/podcasts/:podcastId', (req, res) => {
     if (jobs.isActive(req.params.podcastId)) throw new BadRequest(t('正在处理中，请先取消任务'));
@@ -749,6 +754,57 @@ export function createApp({ config, devOrigin }: AppOptions) {
     res.json({ ok: true });
   });
 
+  // Assistant ---------------------------------------------------------------
+
+  const assistant = new Assistant({
+    vault: () => vault,
+    jobs,
+    settings: () => config.get(),
+    hasVoiceKey: () => Boolean(config.apiKey()),
+    runAgent,
+    searchArxiv,
+    lookupArxiv,
+    importArxiv,
+    startBlog,
+    startPodcast,
+    synthesize: synthesizeScript,
+  });
+
+  const harnessOf = (value: unknown): AgentBackend => {
+    const harness = (value ?? config.get().agent.backend) as AgentBackend;
+    if (!AGENT_BACKENDS.includes(harness)) throw new BadRequest(t('未知的 Agent 后端：{backend}', { backend: String(harness) }));
+    return harness;
+  };
+
+  api.get('/assistant/sessions', (_req, res) => res.json(assistant.list()));
+  api.get('/assistant/sessions/:id', (req, res) => res.json(assistant.get(req.params.id)));
+  api.post('/assistant/sessions', json, (req, res) => {
+    const { message, harness, model, thinking } = req.body ?? {};
+    res.json(assistant.create(String(message ?? ''), harnessOf(harness), String(model ?? ''), String(thinking ?? '')));
+  });
+  api.post('/assistant/sessions/:id/messages', json, (req, res) => {
+    res.json(assistant.send(req.params.id, String(req.body?.message ?? '')));
+  });
+  /** Whatever isn't listed in `approve` is rejected, so a request can't approve anything by omission. */
+  api.post('/assistant/sessions/:id/decide', json, (req, res) => {
+    const { approve, allowReads } = req.body ?? {};
+    if (!Array.isArray(approve)) throw new BadRequest(t('请求无效'));
+    res.json(assistant.decide(req.params.id, approve.map(String), allowReads === true));
+  });
+  api.patch('/assistant/sessions/:id', json, (req, res) => {
+    const { model, thinking } = req.body ?? {};
+    res.json(
+      assistant.update(req.params.id, {
+        ...(model !== undefined ? { model: String(model) } : {}),
+        ...(thinking !== undefined ? { thinking: String(thinking) } : {}),
+      }),
+    );
+  });
+  api.delete('/assistant/sessions/:id', (req, res) => {
+    assistant.remove(req.params.id);
+    res.json({ ok: true });
+  });
+
   // Jobs and events ---------------------------------------------------------
 
   api.get('/jobs', (_req, res) => res.json(jobs.list()));
@@ -795,8 +851,6 @@ export function createApp({ config, devOrigin }: AppOptions) {
 
   return { app, jobs, getVault: () => vault };
 }
-
-class BadRequest extends Error {}
 
 function sendFile(res: Response, path: string, type: string): void {
   if (!existsSync(path)) {
