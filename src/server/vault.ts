@@ -16,6 +16,7 @@ import {
   COLLECTION_ID_PREFIX,
   isCollectionId,
   type AgentBackend,
+  type AssistantSession,
   type Blog,
   type BlogMeta,
   type ChatMessage,
@@ -34,6 +35,7 @@ import { extractPdf } from './pdf.js';
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,120}$/;
 
 export class NotFound extends Error {}
+export class BadRequest extends Error {}
 
 export const withoutArxivVersion = (id: string) => id.replace(/v\d+$/, '');
 
@@ -79,6 +81,7 @@ export function newOutputId(): string {
  *     podcasts/<id>/podcast.json, audio.mp3
  *   <vault>/collections/<collection-id>/
  *     collection.json  blogs/  podcasts/
+ *   <vault>/assistant/<id>.json         (one file per assistant conversation)
  *
  * Blogs and podcasts belong to an "owner", which is either a paper or a collection.
  */
@@ -479,6 +482,40 @@ export class Vault {
   trashChat(paperId: string, sessionId: string): void {
     this.getChat(paperId, sessionId);
     this.moveToTrash(this.chatPath(paperId, sessionId), `${paperId}-chat-${sessionId}.json`);
+  }
+
+  // Assistant ---------------------------------------------------------------
+
+  private get assistantDir() {
+    return join(this.root, 'assistant');
+  }
+
+  private assistantPath(id: string) {
+    return join(this.assistantDir, `${assertId(id)}.json`);
+  }
+
+  saveAssistantSession(session: AssistantSession): void {
+    mkdirSync(this.assistantDir, { recursive: true });
+    writeJson(this.assistantPath(session.id), session);
+  }
+
+  getAssistantSession(id: string): AssistantSession {
+    const file = this.assistantPath(id);
+    if (!existsSync(file)) throw new NotFound(t('会话不存在：{id}', { id }));
+    return readJson<AssistantSession>(file);
+  }
+
+  listAssistantSessions(): AssistantSession[] {
+    if (!existsSync(this.assistantDir)) return [];
+    return readdirSync(this.assistantDir)
+      .filter((f) => f.endsWith('.json') && ID_PATTERN.test(f.slice(0, -5)))
+      .map((f) => readJson<AssistantSession>(join(this.assistantDir, f)))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  trashAssistantSession(id: string): void {
+    this.getAssistantSession(id);
+    this.moveToTrash(this.assistantPath(id), `assistant-${id}.json`);
   }
 
   // Across the vault --------------------------------------------------------

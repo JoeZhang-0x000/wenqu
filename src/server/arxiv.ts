@@ -1,5 +1,5 @@
 import { t } from '../shared/i18n.js';
-import type { ArxivLookup, ArxivMeta } from '../shared/types.js';
+import type { ArxivHit, ArxivLookup, ArxivMeta } from '../shared/types.js';
 import { withoutArxivVersion, type Vault } from './vault.js';
 
 const USER_AGENT = 'wenqu/0.1';
@@ -120,6 +120,7 @@ async function fetchPdf(id: string): Promise<Buffer> {
 
 /** A preview that takes longer than this is no longer worth waiting for. */
 const LOOKUP_TIMEOUT_MS = 10_000;
+const SEARCH_TIMEOUT_MS = 30_000;
 
 /**
  * What each input refers to, before anything is downloaded. The metadata is only a
@@ -149,6 +150,37 @@ export async function lookupArxiv(vault: Vault, inputs: string[]): Promise<Arxiv
     /* Only the preview is lost. */
   }
   return results;
+}
+
+const FIELDED_QUERY = /\b(?:ti|au|abs|co|jr|cat|rn|id|all):/;
+
+/** Turns plain words into what the API expects, where every word must match. Fielded queries pass through. */
+export function arxivSearchQuery(text: string): string {
+  const query = text.trim();
+  if (FIELDED_QUERY.test(query)) return query;
+  const terms = query.match(/"[^"]+"|\S+/g) ?? [];
+  return terms.map((term) => `all:${term}`).join(' AND ');
+}
+
+export async function searchArxiv(
+  vault: Vault,
+  query: string,
+  options: { maxResults?: number; sort?: 'relevance' | 'recent' } = {},
+): Promise<ArxivHit[]> {
+  const params = new URLSearchParams({
+    search_query: arxivSearchQuery(query),
+    start: '0',
+    max_results: String(options.maxResults ?? 10),
+    sortBy: options.sort === 'recent' ? 'submittedDate' : 'relevance',
+    sortOrder: 'descending',
+  });
+  const res = await apiRequest(`https://export.arxiv.org/api/query?${params}`, SEARCH_TIMEOUT_MS);
+  if (!res.ok) throw new Error(t('arXiv API 返回 {status}', { status: res.status }));
+  const papers = vault.listPapers();
+  return parseArxivEntries(await res.text()).map((entry) => ({
+    ...entry,
+    paperId: vault.findArxiv(withoutArxivVersion(entry.arxivId), papers)?.id,
+  }));
 }
 
 export async function importArxiv(vault: Vault, input: string) {

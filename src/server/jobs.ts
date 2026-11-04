@@ -7,6 +7,8 @@ const MAX_FINISHED = 60;
 export interface JobContext {
   signal: AbortSignal;
   delta(text: string): void;
+  /** Clears the streamed text, once it has been saved somewhere else. */
+  reset(): void;
   progress(progress: NonNullable<Job['progress']>): void;
 }
 
@@ -14,6 +16,12 @@ export interface JobContext {
 export class Jobs extends EventEmitter {
   private jobs = new Map<string, Job>();
   private controllers = new Map<string, AbortController>();
+
+  constructor() {
+    super();
+    // One listener per open tab, plus one per task being waited on.
+    this.setMaxListeners(0);
+  }
 
   list(): Job[] {
     return [...this.jobs.values()];
@@ -43,6 +51,10 @@ export class Jobs extends EventEmitter {
       delta: (text) => {
         job.text += text;
         this.send({ type: 'delta', jobId: job.id, text });
+      },
+      reset: () => {
+        job.text = '';
+        this.send({ type: 'job', job: { ...job } });
       },
       progress: (progress) => {
         job.progress = progress;
@@ -74,6 +86,24 @@ export class Jobs extends EventEmitter {
     const controller = this.controllers.get(id);
     controller?.abort();
     return Boolean(controller);
+  }
+
+  cancelTarget(targetId: string): void {
+    for (const job of this.list()) if (job.targetId === targetId && job.status === 'running') this.cancel(job.id);
+  }
+
+  /** Resolves once nothing is running for this target, with the last job that ran for it. */
+  settled(targetId: string): Promise<Job | undefined> {
+    return new Promise((resolve) => {
+      const check = () => {
+        if (this.isActive(targetId)) return;
+        this.off('event', check);
+        const ran = this.list().filter((j) => j.targetId === targetId);
+        resolve(ran.length ? { ...ran[ran.length - 1] } : undefined);
+      };
+      this.on('event', check);
+      check();
+    });
   }
 
   private prune(): void {

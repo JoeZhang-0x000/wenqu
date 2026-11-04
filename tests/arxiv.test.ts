@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { lookupArxiv, parseArxivEntries, parseArxivFeed, parseArxivInput, resetApiPacing } from '../src/server/arxiv';
+import { arxivSearchQuery, lookupArxiv, parseArxivEntries, parseArxivFeed, parseArxivInput, resetApiPacing } from '../src/server/arxiv';
 import { Vault } from '../src/server/vault';
 
 describe('parseArxivInput', () => {
@@ -100,5 +100,15 @@ describe('lookupArxiv', () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
     const [result] = await lookupArxiv(vault, ['1706.03762']);
     expect(result).toMatchObject({ id: '1706.03762', status: 'unknown' });
+  });
+});
+
+describe('arxivSearchQuery', () => {
+  it('requires every word, keeping quoted phrases together', () => {
+    expect(arxivSearchQuery('graph  neural "message passing"')).toBe('all:graph AND all:neural AND all:"message passing"');
+  });
+
+  it('leaves field syntax alone', () => {
+    expect(arxivSearchQuery('ti:"graph neural" AND cat:cs.LG')).toBe('ti:"graph neural" AND cat:cs.LG');
   });
 });
