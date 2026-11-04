@@ -505,6 +505,8 @@ input[type='range'] { width: 100%; accent-color: var(--signal); }
 .chat-box { border: 1px solid var(--line-2); border-radius: 11px; background: var(--paper); padding: 8px 8px 6px 11px; }
 .chat-box:focus-within { border-color: var(--ink-3); }
 .chat-box textarea { border: 0; background: transparent; padding: 0; resize: none; display: block; }
+/* The box around it already shows focus. */
+.chat-box textarea:focus-visible { outline: none; }
 .chat-actions { display: flex; align-items: center; margin-top: 2px; }
 .send { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 8px; background: var(--signal); color: var(--signal-ink); }
 .thinking { display: flex; align-items: center; gap: 9px; padding: 4px 0; font-size: 13px; }
