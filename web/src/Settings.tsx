@@ -9,12 +9,11 @@ import {
   PODCAST_STYLES,
   SPEAKER_PAIRS,
   type AgentBackend,
-  type AgentStatus,
   type PublicSettings,
   type SettingsPatch,
   type UiLanguage,
 } from '../../src/shared/types';
-import { api, applySettings, bumpLibrary, fail, settingsStore, toast, useStore } from './lib';
+import { agentsStore, api, applySettings, bumpLibrary, fail, loadAgents, settingsStore, toast, useStore } from './lib';
 import { Field, Select, Switch } from './ui';
 
 type Section = 'general' | 'agent' | 'podcast' | 'blog' | 'api' | 'vault';
@@ -97,14 +96,13 @@ const agentPlaceholder = (backend: AgentBackend) =>
   ({ claude: t('留空使用默认，如 sonnet'), codex: t('留空使用默认'), pi: t('留空使用 pi 的默认模型') })[backend];
 
 function AgentSection({ settings }: { settings: PublicSettings }) {
-  const [status, setStatus] = useState<AgentStatus[]>();
-  const [models, setModels] = useState<string[]>([]);
+  const status = useStore(agentsStore);
+  const [refreshing, setRefreshing] = useState(false);
   const [tests, setTests] = useState<Partial<Record<AgentBackend, { busy?: boolean; ok?: boolean; text?: string }>>>({});
   const current = settings.agent.backend;
 
   useEffect(() => {
-    api<AgentStatus[]>('/agents').then(setStatus).catch(fail);
-    api<string[]>('/agents/pi/models').then(setModels).catch(() => {});
+    void loadAgents();
   }, []);
 
   const test = async (backend: AgentBackend) => {
@@ -121,7 +119,7 @@ function AgentSection({ settings }: { settings: PublicSettings }) {
   return (
     <section>
       <h3 className="serif">{t('Agent 后端')}</h3>
-      <p className="muted">{t('问答、博客和播客脚本都由本机的命令行 Agent 完成，并使用它自己的登录状态。论文内容被当作不可信数据：Claude 和 pi 运行时禁用所有工具，Codex 运行在只读沙箱中。')}</p>
+      <p className="muted">{t('这里的选择用于生成博客和播客脚本，也是新建问答时的默认值。Agent 使用它们自己的登录状态。论文内容被当作不可信数据：Claude 和 pi 运行时禁用所有工具，Codex 运行在只读沙箱中。')}</p>
       <div className="agents">
         {AGENT_BACKENDS.map((backend) => {
           const info = status?.find((s) => s.backend === backend);
@@ -152,7 +150,7 @@ function AgentSection({ settings }: { settings: PublicSettings }) {
               </div>
               <div onClick={(e) => e.stopPropagation()}>
                 <input
-                  list={backend === 'pi' ? 'pi-models' : undefined}
+                  list={`${backend}-models`}
                   placeholder={agentPlaceholder(backend)}
                   defaultValue={settings.agent.models[backend]}
                   aria-label={t('{name} 模型', { name: AGENT_NAMES[backend] })}
@@ -173,9 +171,24 @@ function AgentSection({ settings }: { settings: PublicSettings }) {
           );
         })}
       </div>
-      <datalist id="pi-models">
-        {models.map((m) => <option key={m} value={m} />)}
-      </datalist>
+      {status?.map((agent) => (
+        <datalist id={`${agent.backend}-models`} key={agent.backend}>
+          {agent.models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+        </datalist>
+      ))}
+      <div className="form-actions left">
+        <button
+          className="btn"
+          disabled={refreshing}
+          onClick={async () => {
+            setRefreshing(true);
+            await loadAgents(true);
+            setRefreshing(false);
+          }}
+        >
+          {refreshing && <Loader2 size={13} className="spin" />}{t('重新检测')}
+        </button>
+      </div>
     </section>
   );
 }

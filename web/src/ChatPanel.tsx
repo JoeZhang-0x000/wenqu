@@ -1,7 +1,7 @@
 import { ArrowUp, History, MessageSquare, Plus, Square, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { t } from '../../src/shared/i18n';
-import type { AgentBackend, ChatMessage, ChatSession, ChatSessionMeta, Job } from '../../src/shared/types';
+import type { AgentBackend, AgentStatus, ChatMessage, ChatSession, ChatSessionMeta, Job } from '../../src/shared/types';
 import { agentsStore, api, bumpLibrary, confirmAction, fail, formatDate, jobsStore, loadAgents, settingsStore, useFetch, useStore } from './lib';
 import { Markdown } from './Markdown';
 import type { SelectionAsk } from './PdfViewer';
@@ -34,6 +34,8 @@ export function ChatPanel({
   const draftHarness = pickedHarness ?? (installed?.includes(settings.agent.backend) ? settings.agent.backend : installed?.[0]);
   const sessionHarness = sessions?.find((s) => s.id === sessionId)?.harness ?? (session?.id === sessionId ? session?.harness : undefined);
   const harness = sessionId ? sessionHarness : draftHarness;
+  const [draftModel, setDraftModel] = useState<string | null>(null);
+  const model = sessionId ? (session?.id === sessionId ? session.model : '') : (draftModel ?? (draftHarness ? settings.agent.models[draftHarness] : '') ?? '');
   const [input, setInput] = useState('');
   const [quote, setQuote] = useState<{ text: string; page?: number } | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
@@ -68,7 +70,7 @@ export function ChatPanel({
         const res = await api<{ message: ChatMessage }>(`/papers/${paperId}/chats/${sessionId}/messages`, { body });
         setSession((current) => (current ? { ...current, messages: [...current.messages, res.message] } : current));
       } else {
-        const res = await api<{ sessionId: string }>(`/papers/${paperId}/chats`, { body: { ...body, harness: draftHarness } });
+        const res = await api<{ sessionId: string }>(`/papers/${paperId}/chats`, { body: { ...body, harness: draftHarness, model } });
         setSessionId(res.sessionId);
       }
     } catch (err) {
@@ -189,7 +191,16 @@ export function ChatPanel({
             <span className="muted small">Harness</span>
             {!agents && <span className="muted small">{t('检测中')}</span>}
             {installed?.map((id) => (
-              <button key={id} className={`chip ${draftHarness === id ? 'on' : ''}`} onClick={() => setPickedHarness(id)}>{id}</button>
+              <button
+                key={id}
+                className={`chip ${draftHarness === id ? 'on' : ''}`}
+                onClick={() => {
+                  setPickedHarness(id);
+                  setDraftModel(null);
+                }}
+              >
+                {id}
+              </button>
             ))}
             {installed?.length === 0 && <span className="over small">{t('没有检测到本地 Harness，请安装 claude、codex 或 pi。')}</span>}
           </div>
@@ -215,6 +226,20 @@ export function ChatPanel({
             }}
           />
           <div className="chat-actions">
+            {harness && (
+              <ModelSelect
+                agent={agents?.find((a) => a.backend === harness)}
+                value={model}
+                onChange={async (next) => {
+                  if (!sessionId) return setDraftModel(next);
+                  try {
+                    setSession(await api<ChatSession>(`/papers/${paperId}/chats/${sessionId}`, { method: 'PATCH', body: { model: next } }));
+                  } catch (err) {
+                    fail(err);
+                  }
+                }}
+              />
+            )}
             <div className="spacer" />
             {running ? (
               <button className="send" title={t('停止')} onClick={() => api(`/jobs/${running.id}/cancel`, { method: 'POST' }).catch(fail)}>
@@ -229,6 +254,20 @@ export function ChatPanel({
         </div>
       </div>
     </div>
+  );
+}
+
+/** Lists what the harness reports. A model set elsewhere is kept as an option, even if it isn't listed. */
+function ModelSelect({ agent, value, onChange }: { agent?: AgentStatus; value: string; onChange(model: string): void }) {
+  const models = agent?.models ?? [];
+  return (
+    <select className="model-select mono" aria-label={t('模型')} title={t('模型')} value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">{agent?.defaultModel ? t('默认（{model}）', { model: agent.defaultModel }) : t('默认模型')}</option>
+      {value && !models.some((m) => m.id === value) && <option value={value}>{value}</option>}
+      {models.map((m) => (
+        <option key={m.id} value={m.id}>{m.label}</option>
+      ))}
+    </select>
   );
 }
 

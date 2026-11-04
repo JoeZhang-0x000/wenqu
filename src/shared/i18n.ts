@@ -5,6 +5,10 @@
  */
 const en = {
   // Chat panel
+  模型: 'Model',
+  默认模型: 'Default model',
+  '默认（{model}）': 'Default ({model})',
+  '模型名称无效：{model}': 'Invalid model name: {model}',
   '会话创建后不能更换 Harness': "A chat's harness can't change after it is created",
   '没有检测到本地 Harness，请安装 claude、codex 或 pi。': 'No local harness found. Install claude, codex or pi.',
   历史会话: 'Chat history',
@@ -263,8 +267,9 @@ const en = {
   '留空使用默认，如 sonnet': 'Leave empty for the default, or enter a model such as sonnet',
   留空使用默认: 'Leave empty for the default',
   '留空使用 pi 的默认模型': "Leave empty for pi's default model",
-  '问答、博客和播客脚本都由本机的命令行 Agent 完成，并使用它自己的登录状态。论文内容被当作不可信数据：Claude 和 pi 运行时禁用所有工具，Codex 运行在只读沙箱中。':
-    'Questions, blog posts and podcast scripts are handled by a command-line agent on this machine, using its own login. Paper content is treated as untrusted: Claude and pi run with all tools disabled, and Codex runs in a read-only sandbox.',
+  '这里的选择用于生成博客和播客脚本，也是新建问答时的默认值。Agent 使用它们自己的登录状态。论文内容被当作不可信数据：Claude 和 pi 运行时禁用所有工具，Codex 运行在只读沙箱中。':
+    'This choice is used for blog posts and podcast scripts, and as the default for new chats. Agents use their own logins. Paper content is treated as untrusted: Claude and pi run with all tools disabled, and Codex runs in a read-only sandbox.',
+  重新检测: 'Check again',
   检测中: 'Checking',
   未安装: 'Not installed',
   测试: 'Test',

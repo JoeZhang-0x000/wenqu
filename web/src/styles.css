@@ -494,6 +494,8 @@ input[type='range'] { width: 100%; accent-color: var(--signal); }
 .history-row:hover > .icon, .history-row > .icon:focus-visible { opacity: 1; }
 .harness-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-bottom: 6px; }
 .harness-picker .chip { padding: 1px 9px; font: 12px var(--mono); }
+.model-select { width: auto; max-width: 62%; min-width: 0; padding: 1px 4px; border-color: transparent; background: transparent; font-size: 11.5px; color: var(--ink-2); text-overflow: ellipsis; }
+.model-select:hover { border-color: var(--line); }
 .chat-input { flex: none; padding: 8px 12px 12px; }
 .quote-chip {
   display: flex; align-items: flex-start; gap: 4px; margin-bottom: 6px; padding: 5px 4px 5px 10px;

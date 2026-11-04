@@ -287,6 +287,8 @@ export interface ChatSessionMeta {
   title: string;
   /** The agent CLI answering in this session. Chosen when it is created, then fixed. */
   harness: AgentBackend;
+  /** Empty means the harness's own default. Can change between messages. */
+  model: string;
   messageCount: number;
   createdAt: string;
   updatedAt: string;
@@ -320,10 +322,18 @@ export type ServerEvent =
   | { type: 'delta'; jobId: string; text: string }
   | { type: 'library' };
 
+export interface AgentModel {
+  id: string;
+  label: string;
+}
+
 export interface AgentStatus {
   backend: AgentBackend;
   installed: boolean;
   version?: string;
+  /** What the CLI itself reports, not a list kept in this app. */
+  models: AgentModel[];
+  defaultModel?: string;
 }
 
 export interface OutputEntry {

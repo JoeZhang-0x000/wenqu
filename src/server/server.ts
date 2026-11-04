@@ -20,7 +20,8 @@ import {
   type ServerEvent,
   type SettingsPatch,
 } from '../shared/types.js';
-import { detectAgents, listModels, runAgent } from './agents.js';
+import { runAgent } from './agents.js';
+import { detectAgents } from './harness.js';
 import { importArxiv } from './arxiv.js';
 import { Config, expandHome } from './config.js';
 import { DoubaoError, synthesizePodcast } from './doubao.js';
@@ -119,7 +120,6 @@ export function createApp({ config, devOrigin }: AppOptions) {
   // Agents ------------------------------------------------------------------
 
   api.get('/agents', async (req, res) => res.json(await detectAgents(Boolean(req.query.refresh))));
-  api.get('/agents/:backend/models', async (req, res) => res.json(await listModels(req.params.backend as AgentBackend)));
   api.post('/agents/test', json, async (req, res) => {
     const { backend, model } = req.body as { backend: AgentBackend; model?: string };
     const started = Date.now();
@@ -666,10 +666,11 @@ export function createApp({ config, devOrigin }: AppOptions) {
     sessionId: string,
     history: ChatMessage[],
     harness: AgentBackend,
+    model: string,
     body: { message: string; selection?: string; page?: number },
   ) => {
     const ctx = paperContext(paperId);
-    const agent = agentChoice({ backend: harness });
+    const agent = { backend: harness, model };
     const user: ChatMessage = {
       role: 'user',
       content: body.message.trim(),
@@ -706,15 +707,21 @@ export function createApp({ config, devOrigin }: AppOptions) {
     paperContext(req.params.id);
     const harness = (req.body.harness ?? config.get().agent.backend) as AgentBackend;
     if (!AGENT_BACKENDS.includes(harness)) throw new BadRequest(t('未知的 Agent 后端：{backend}', { backend: String(harness) }));
-    const session = vault.createChat(req.params.id, req.body.message, harness);
-    res.json({ sessionId: session.id, ...askInSession(req.params.id, session.id, [], harness, req.body) });
+    const model = String(req.body.model ?? '');
+    const session = vault.createChat(req.params.id, req.body.message, harness, model);
+    res.json({ sessionId: session.id, ...askInSession(req.params.id, session.id, [], harness, model, req.body) });
   });
 
   api.post('/papers/:id/chats/:sessionId/messages', json, (req, res) => {
     if (!req.body?.message?.trim()) throw new BadRequest(t('问题不能为空'));
     const session = vault.getChat(req.params.id, req.params.sessionId);
     if (jobs.isActive(session.id)) throw new BadRequest(t('这个会话正在回答，请等它结束'));
-    res.json(askInSession(req.params.id, session.id, session.messages, session.harness, req.body));
+    res.json(askInSession(req.params.id, session.id, session.messages, session.harness, session.model, req.body));
+  });
+
+  /** The model can change at any time. The harness can't, so it isn't accepted here. */
+  api.patch('/papers/:id/chats/:sessionId', json, (req, res) => {
+    res.json(vault.updateChat(req.params.id, req.params.sessionId, { model: String(req.body?.model ?? '') }));
   });
 
   api.delete('/papers/:id/chats/:sessionId', (req, res) => {

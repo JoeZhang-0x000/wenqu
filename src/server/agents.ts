@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { t } from '../shared/i18n.js';
-import { AGENT_BACKENDS, type AgentBackend, type AgentStatus } from '../shared/types.js';
+import type { AgentBackend } from '../shared/types.js';
 
 export interface AgentRequest {
   backend: AgentBackend;
@@ -96,9 +96,13 @@ const ADAPTERS: Record<AgentBackend, Adapter> = {
   },
 };
 
+const SAFE_MODEL = /^[\w.:@/][\w.:@/-]*$/;
+
 export function runAgent(req: AgentRequest): Promise<string> {
   const adapter = ADAPTERS[req.backend];
   if (!adapter) return Promise.reject(new Error(t('未知的 Agent 后端：{backend}', { backend: req.backend })));
+  // A value starting with "-" would be read as a command-line flag.
+  if (req.model && !SAFE_MODEL.test(req.model)) return Promise.reject(new Error(t('模型名称无效：{model}', { model: req.model })));
 
   return new Promise((resolve, reject) => {
     const cwd = mkdtempSync(join(tmpdir(), 'p2p-agent-'));
@@ -168,47 +172,4 @@ export function runAgent(req: AgentRequest): Promise<string> {
       resolve(output);
     });
   });
-}
-
-function capture(command: string, args: string[], timeoutMs: number): Promise<{ ok: boolean; out: string }> {
-  return new Promise((resolve) => {
-    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'ignore'], timeout: timeoutMs });
-    let out = '';
-    child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (c: string) => (out += c));
-    child.on('error', () => resolve({ ok: false, out: '' }));
-    child.on('close', (code) => resolve({ ok: code === 0, out }));
-  });
-}
-
-let detected: { at: number; agents: Promise<AgentStatus[]> } | undefined;
-const DETECT_TTL_MS = 5 * 60_000;
-
-/** Which agent CLIs are on this machine. Starting them is slow, so the answer is kept for a while. */
-export function detectAgents(refresh = false): Promise<AgentStatus[]> {
-  if (!detected || refresh || Date.now() - detected.at > DETECT_TTL_MS) {
-    detected = {
-      at: Date.now(),
-      agents: Promise.all(
-        AGENT_BACKENDS.map(async (backend) => {
-          const { ok, out } = await capture(backend, ['--version'], 8000);
-          return { backend, installed: ok, version: out.trim().split('\n')[0] || undefined };
-        }),
-      ),
-    };
-  }
-  return detected.agents;
-}
-
-/** Only pi can enumerate its models; the other CLIs take a free-form model name. */
-export async function listModels(backend: AgentBackend): Promise<string[]> {
-  if (backend !== 'pi') return [];
-  const { ok, out } = await capture('pi', ['--list-models'], 15000);
-  if (!ok) return [];
-  return out
-    .split('\n')
-    .slice(1)
-    .map((line) => line.trim().split(/\s+/))
-    .filter((cols) => cols.length >= 2)
-    .map(([provider, model]) => `${provider}/${model}`);
 }
