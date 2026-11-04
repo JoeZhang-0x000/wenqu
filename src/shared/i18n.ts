@@ -53,6 +53,7 @@ const en = {
   '暂时无法获取论文信息，仍可以添加': "Couldn't fetch its details right now, but you can still add it",
   '添加 {count} 篇': 'Add {count} papers',
   添加: 'Add',
+  重试: 'Try again',
   '用 arXiv 链接添加': 'Add from an arXiv link',
   '一次最多添加 {count} 篇': 'You can add up to {count} papers at once',
   '只支持 PDF 文件': 'Only PDF files are supported',

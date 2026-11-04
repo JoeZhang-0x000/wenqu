@@ -35,6 +35,8 @@ const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,120}$/;
 
 export class NotFound extends Error {}
 
+export const withoutArxivVersion = (id: string) => id.replace(/v\d+$/, '');
+
 function assertId(id: string): string {
   if (!ID_PATTERN.test(id)) throw new NotFound(t('无效的 ID：{id}', { id }));
   return id;
@@ -190,9 +192,9 @@ export class Vault {
   }
 
   /** Finds an imported arXiv paper. Without a version in `arxivId`, any version matches. */
-  findArxiv(arxivId: string): PaperSummary | undefined {
-    const base = arxivId.replace(/v\d+$/, '');
-    return this.listPapers().find((p) => (arxivId === base ? p.arxivId?.replace(/v\d+$/, '') === base : p.arxivId === arxivId));
+  findArxiv(arxivId: string, papers: PaperSummary[] = this.listPapers()): PaperSummary | undefined {
+    const base = withoutArxivVersion(arxivId);
+    return papers.find((p) => (arxivId === base ? p.arxivId && withoutArxivVersion(p.arxivId) === base : p.arxivId === arxivId));
   }
 
   readPages(id: string): string[] {

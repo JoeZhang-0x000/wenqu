@@ -1,6 +1,6 @@
 import { t } from '../shared/i18n.js';
 import type { ArxivLookup, ArxivMeta } from '../shared/types.js';
-import type { Vault } from './vault.js';
+import { withoutArxivVersion, type Vault } from './vault.js';
 
 const USER_AGENT = 'wenqu/0.1';
 const MAX_PDF_BYTES = 200 * 1024 * 1024;
@@ -67,8 +67,8 @@ export function parseArxivFeed(xml: string): ArxivMeta | null {
   return parseArxivEntries(xml)[0] ?? null;
 }
 
-async function request(url: string, signal?: AbortSignal): Promise<Response> {
-  const timeout = AbortSignal.timeout(180_000);
+async function request(url: string, signal?: AbortSignal, timeoutMs = 180_000): Promise<Response> {
+  const timeout = AbortSignal.timeout(timeoutMs);
   try {
     return await fetch(url, {
       headers: { 'User-Agent': USER_AGENT },
@@ -81,8 +81,25 @@ async function request(url: string, signal?: AbortSignal): Promise<Response> {
   }
 }
 
+/** arXiv asks API clients to leave three seconds between requests. */
+const API_SPACING_MS = 3000;
+let nextApiSlot = 0;
+
+export function resetApiPacing(): void {
+  nextApiSlot = 0;
+}
+
+/** Queues the call for its turn, which also spaces out the imports in a batch. */
+async function apiRequest(url: string, timeoutMs?: number): Promise<Response> {
+  const now = Date.now();
+  const wait = Math.max(0, nextApiSlot - now);
+  nextApiSlot = Math.max(now, nextApiSlot) + API_SPACING_MS;
+  if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
+  return request(url, undefined, timeoutMs);
+}
+
 async function fetchMeta(id: string): Promise<ArxivMeta | null> {
-  const res = await request(`https://export.arxiv.org/api/query?id_list=${encodeURIComponent(id)}`);
+  const res = await apiRequest(`https://export.arxiv.org/api/query?id_list=${encodeURIComponent(id)}`);
   if (!res.ok) throw new Error(t('arXiv API 返回 {status}', { status: res.status }));
   return parseArxivFeed(await res.text());
 }
@@ -101,27 +118,30 @@ async function fetchPdf(id: string): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
-const withoutVersion = (id: string) => id.replace(/v\d+$/, '');
+/** A preview that takes longer than this is no longer worth waiting for. */
+const LOOKUP_TIMEOUT_MS = 10_000;
 
 /**
  * What each input refers to, before anything is downloaded. The metadata is only a
  * preview, so when arXiv can't be reached the ids still come back and can be imported.
  */
 export async function lookupArxiv(vault: Vault, inputs: string[]): Promise<ArxivLookup[]> {
+  const papers = vault.listPapers();
   const results: ArxivLookup[] = inputs.map((input) => {
     const id = parseArxivInput(input);
-    return { input, id, paperId: id ? vault.findArxiv(id)?.id : undefined, status: id ? 'unknown' : 'invalid' };
+    return { input, id, paperId: id ? vault.findArxiv(id, papers)?.id : undefined, status: id ? 'unknown' : 'invalid' };
   });
   const ids = [...new Set(results.flatMap((r) => (r.id ? [r.id] : [])))];
   if (!ids.length) return results;
   try {
-    const res = await request(`https://export.arxiv.org/api/query?id_list=${ids.map(encodeURIComponent).join(',')}&max_results=${ids.length}`);
+    const res = await apiRequest(`https://export.arxiv.org/api/query?id_list=${ids.map(encodeURIComponent).join(',')}&max_results=${ids.length}`, LOOKUP_TIMEOUT_MS);
     if (!res.ok) return results;
     const entries = parseArxivEntries(await res.text());
     for (const result of results) {
       if (!result.id) continue;
-      const base = withoutVersion(result.id);
-      const entry = entries.find((e) => withoutVersion(e.arxivId) === base);
+      // Two versions of a paper can be asked for together, and arXiv picks the order.
+      const base = withoutArxivVersion(result.id);
+      const entry = entries.find((e) => e.arxivId === result.id) ?? entries.find((e) => withoutArxivVersion(e.arxivId) === base);
       result.status = entry ? 'found' : 'missing';
       if (entry) result.meta = entry;
     }

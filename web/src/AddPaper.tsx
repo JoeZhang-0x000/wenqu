@@ -13,6 +13,7 @@ interface ImportItem {
   key: number;
   name: string;
   state: 'running' | 'done' | 'failed';
+  retry(): void;
   paper?: PaperSummary;
   duplicate?: boolean;
   error?: string;
@@ -22,12 +23,16 @@ interface ImportItem {
 const importsStore = createStore<ImportItem[]>([]);
 let importKey = 0;
 
-async function runImport(name: string, request: () => Promise<{ paper: PaperSummary; duplicate: boolean }>) {
+async function runImport(name: string, request: () => Promise<{ paper: PaperSummary; duplicate: boolean }>): Promise<void> {
   const key = ++importKey;
   const patch = (next: Partial<ImportItem>) => importsStore.set(importsStore.get().map((i) => (i.key === key ? { ...i, ...next } : i)));
   // With the dialog closed the result goes to a toast, so it needn't wait in the list.
   const forget = () => importsStore.set(importsStore.get().filter((i) => i.key !== key));
-  importsStore.set([{ key, name, state: 'running' }, ...importsStore.get()]);
+  const retry = () => {
+    forget();
+    void runImport(name, request);
+  };
+  importsStore.set([{ key, name, state: 'running', retry }, ...importsStore.get()]);
   try {
     const { paper, duplicate } = await request();
     patch({ state: 'done', paper, duplicate });
@@ -57,14 +62,21 @@ export async function importFiles(files: File[]) {
   }
 }
 
+/** Answers already known, so editing a list only asks arXiv about what is new. */
+const lookupCache = new Map<string, ArxivLookup>();
+
 /** One input per link or id, in the order pasted, without repeats. */
 const splitLinks = (text: string) => [...new Set(text.split(/[\s,，]+/).filter(Boolean))];
 
 export function AddPaperDialog() {
   const open = useStore(addPaperStore);
   const items = useStore(importsStore);
+  // Held here so it survives switching tabs.
+  const [linkText, setLinkText] = useState('');
   const close = () => {
     addPaperStore.set(null);
+    setLinkText('');
+    lookupCache.clear();
     importsStore.set(importsStore.get().filter((i) => i.state === 'running'));
   };
 
@@ -92,7 +104,7 @@ export function AddPaperDialog() {
           </button>
         </div>
         <div className="add-paper-body">
-          {open.tab === 'file' ? <FilePane /> : <LinkPane />}
+          {open.tab === 'file' ? <FilePane /> : <LinkPane text={linkText} setText={setLinkText} onOpenPaper={close} />}
           {items.length > 0 && (
             <ul className="import-list">
               {items.map((item) => <ImportRow key={item.key} item={item} onOpen={close} />)}
@@ -120,6 +132,7 @@ function ImportRow({ item, onOpen }: { item: ImportItem; onOpen(): void }) {
         {item.state === 'failed' && <div className="over small">{item.error}</div>}
         {item.duplicate && <div className="muted small">{t('已在书架中')}</div>}
       </div>
+      {item.state === 'failed' && <button className="btn small" onClick={item.retry}>{t('重试')}</button>}
     </li>
   );
 }
@@ -148,8 +161,7 @@ function FilePane() {
   );
 }
 
-function LinkPane() {
-  const [text, setText] = useState('');
+function LinkPane({ text, setText, onOpenPaper }: { text: string; setText(text: string): void; onOpenPaper(): void }) {
   const [lookups, setLookups] = useState<ArxivLookup[]>();
   const [checking, setChecking] = useState(false);
   const inputs = splitLinks(text);
@@ -162,11 +174,22 @@ function LinkPane() {
       setChecking(false);
       return;
     }
+    const fresh = inputs.filter((input) => !lookupCache.has(input));
+    if (!fresh.length) {
+      setChecking(false);
+      setLookups(inputs.flatMap((input) => lookupCache.get(input) ?? []));
+      return;
+    }
     let alive = true;
     setChecking(true);
     const timer = setTimeout(() => {
-      api<ArxivLookup[]>('/papers/arxiv/lookup', { body: { inputs } })
-        .then((results) => alive && setLookups(results))
+      api<ArxivLookup[]>('/papers/arxiv/lookup', { body: { inputs: fresh } })
+        .then((results) => {
+          // `unknown` means arXiv couldn't answer, so it's worth asking again next time.
+          const answered = new Map(results.map((r) => [r.input, r]));
+          for (const result of results) if (result.status !== 'unknown') lookupCache.set(result.input, result);
+          if (alive) setLookups(inputs.flatMap((input) => answered.get(input) ?? lookupCache.get(input) ?? []));
+        })
         .catch((err) => alive && fail(err))
         .finally(() => alive && setChecking(false));
     }, 500);
@@ -180,7 +203,9 @@ function LinkPane() {
 
   const submit = () => {
     if (!addable.length) return;
-    setText('');
+    // What can't be added stays in the box, next to its reason, so it can be corrected.
+    setText((lookups ?? []).filter((l) => !addable.includes(l) && !l.paperId).map((l) => l.input).join('\n'));
+    for (const lookup of addable) lookupCache.delete(lookup.input);
     void (async () => {
       for (const lookup of addable) {
         await runImport(lookup.meta?.title ?? lookup.id!, () => api('/papers/arxiv', { body: { input: lookup.input } }));
@@ -198,7 +223,7 @@ function LinkPane() {
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+          if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault();
             submit();
           }
@@ -208,7 +233,7 @@ function LinkPane() {
       {checking && <p className="muted small add-paper-checking"><Loader2 size={13} className="spin" />{t('正在查询 arXiv')}</p>}
       {lookups && (
         <ul className="lookup-list">
-          {lookups.map((l) => <LookupRow key={l.input} lookup={l} />)}
+          {lookups.map((l) => <LookupRow key={l.input} lookup={l} onOpenPaper={onOpenPaper} />)}
         </ul>
       )}
       <div className="form-actions">
@@ -220,7 +245,7 @@ function LinkPane() {
   );
 }
 
-function LookupRow({ lookup }: { lookup: ArxivLookup }) {
+function LookupRow({ lookup, onOpenPaper }: { lookup: ArxivLookup; onOpenPaper(): void }) {
   if (lookup.status === 'invalid') {
     return <li className="lookup-row"><b>{lookup.input}</b><span className="over small">{t('这不是有效的 arXiv 链接或编号')}</span></li>;
   }
@@ -237,7 +262,7 @@ function LookupRow({ lookup }: { lookup: ArxivLookup }) {
         </span>
       )}
       {!meta && <span className="muted small">{t('暂时无法获取论文信息，仍可以添加')}</span>}
-      {lookup.paperId && <a className="small" href={paperHref(lookup.paperId)} onClick={() => addPaperStore.set(null)}>{t('已在书架中')}</a>}
+      {lookup.paperId && <a className="small" href={paperHref(lookup.paperId)} onClick={onOpenPaper}>{t('已在书架中')}</a>}
     </li>
   );
 }

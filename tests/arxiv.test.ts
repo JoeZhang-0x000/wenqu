@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { lookupArxiv, parseArxivEntries, parseArxivFeed, parseArxivInput } from '../src/server/arxiv';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { lookupArxiv, parseArxivEntries, parseArxivFeed, parseArxivInput, resetApiPacing } from '../src/server/arxiv';
+import { Vault } from '../src/server/vault';
 
 describe('parseArxivInput', () => {
   it.each([
@@ -61,9 +62,10 @@ describe('parseArxivEntries', () => {
 });
 
 describe('lookupArxiv', () => {
-  const vault = { findArxiv: (id: string) => (id.startsWith('2005.14165') ? { id: 'gpt-3' } : undefined) } as any;
+  const vault = { listPapers: () => [{ id: 'gpt-3', arxivId: '2005.14165v4' }], findArxiv: Vault.prototype.findArxiv } as any;
   const feed = `<feed><entry><id>http://arxiv.org/abs/1706.03762v7</id><title>Attention</title></entry></feed>`;
 
+  beforeEach(() => resetApiPacing());
   afterEach(() => vi.unstubAllGlobals());
 
   it('matches entries by id whatever the version, and reports what it could not find', async () => {
@@ -74,7 +76,17 @@ describe('lookupArxiv', () => {
     expect(results[0].meta?.title).toBe('Attention');
     expect(results[2].paperId).toBe('gpt-3');
     expect(fetchMock).toHaveBeenCalledOnce();
-    expect(String(fetchMock.mock.calls[0]).toString()).not.toContain('nonsense');
+    expect(String(fetchMock.mock.calls[0])).not.toContain('nonsense');
+  });
+
+  it('prefers the exact version when two are asked for together', async () => {
+    const both = `<feed>
+      <entry><id>http://arxiv.org/abs/1706.03762v7</id><title>Latest</title></entry>
+      <entry><id>http://arxiv.org/abs/1706.03762v5</id><title>Fifth</title></entry>
+    </feed>`;
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(both)));
+    const results = await lookupArxiv(vault, ['1706.03762v5', '1706.03762']);
+    expect(results.map((r) => r.meta?.title)).toEqual(['Fifth', 'Latest']);
   });
 
   it('asks arXiv nothing when no input names a paper', async () => {
