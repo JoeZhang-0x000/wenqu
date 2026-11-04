@@ -36,8 +36,12 @@ const en = {
   帮我找几篇和最新添加的论文相近的工作: 'Find work related to the paper I added most recently',
   '给最近添加的 3 篇论文各生成一期播客脚本': 'Write a podcast script for each of my 3 latest papers',
   '整个书架，一起打理。': 'Your whole library, in one conversation.',
-  '助手能查看和整理书架里的所有论文，在 arXiv 上找相近的工作，也能批量生成内容。任何查询和改动都要先经过你批准。':
-    'The assistant can look through and organize every paper in your library, find related work on arXiv, and generate content in batches. It asks before it reads or changes anything.',
+  '助手能查看和整理书架里的所有论文，在 arXiv 上找相近的工作，也能批量生成内容。':
+    'The assistant can look through and organize every paper in your library, find related work on arXiv, and generate content in batches. ',
+  '它改动书架之前会先征得你的同意。': 'It asks before it changes your library.',
+  '它查看或改动书架之前会先征得你的同意。': 'It asks before it reads or changes your library.',
+  '发送新消息会拒绝上面等待批准的操作': 'Sending a new message rejects the actions waiting above',
+  助手正在工作: 'The assistant is working',
   '{agent} 正在思考': '{agent} is thinking',
   问问助手: 'Ask the assistant',
   '问问助手，或让它做点什么': 'Ask the assistant, or tell it what to do',

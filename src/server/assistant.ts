@@ -163,7 +163,22 @@ export class Assistant {
   }
 
   get(id: string): AssistantSession {
-    return this.settleInterrupted(this.vault.getAssistantSession(id));
+    return this.withCurrentHits(this.settleInterrupted(this.vault.getAssistantSession(id)));
+  }
+
+  /** Search results are kept as they were found, but whether each is in the library can change. */
+  private withCurrentHits(session: AssistantSession): AssistantSession {
+    if (!session.messages.some((m) => m.actions?.some((a) => a.hits))) return session;
+    const papers = this.vault.listPapers();
+    return {
+      ...session,
+      messages: session.messages.map((m) => ({
+        ...m,
+        actions: m.actions?.map((a) =>
+          a.hits ? { ...a, hits: a.hits.map((hit) => ({ ...hit, paperId: this.vault.findArxiv(withoutArxivVersion(hit.arxivId), papers)?.id })) } : a,
+        ),
+      })),
+    };
   }
 
   /** Actions cut off by a restart may or may not have finished, so they are reported and never rerun. */

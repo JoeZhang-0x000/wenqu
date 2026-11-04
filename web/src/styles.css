@@ -556,6 +556,7 @@ input[type='range'] { width: 100%; accent-color: var(--signal); }
 .approval-item b { font-weight: 500; overflow-wrap: anywhere; }
 .approval-item input { flex: none; margin-top: 4px; accent-color: var(--signal); }
 .approval-list li.danger b { color: var(--bad); }
+.approval-list li > .action-details { padding-left: 21px; }
 .action-details { margin: 3px 0 0; font-size: 12px; color: var(--ink-2); }
 .action-details > div { display: flex; gap: 8px; }
 .action-details dt { flex: none; color: var(--ink-3); }

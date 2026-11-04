@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { visibleReply } from '../../src/shared/assistant';
 import { t } from '../../src/shared/i18n';
 import type { AgentBackend, ArxivHit, AssistantAction, AssistantSession, AssistantSessionMeta, Job, PaperSummary } from '../../src/shared/types';
-import { EffortSelect, ModelSelect, effortsOf } from './ChatPanel';
+import { EffortSelect, HarnessPicker, ModelSelect, Thinking, effortsOf } from './ChatPanel';
 import { agentsStore, api, bumpLibrary, confirmAction, fail, formatDate, jobsStore, loadAgents, ownerHref, paperHref, settingsStore, toast, useFetch, useStore } from './lib';
 import { Markdown } from './Markdown';
 
@@ -80,6 +80,7 @@ function Conversation({ sessionId }: { sessionId?: string }) {
   const logRef = useRef<HTMLDivElement>(null);
   const messages = session?.messages ?? [];
   const streamed = running ? visibleReply(running.text) : '';
+  const waiting = messages.some((m) => m.actions?.some((a) => a.status === 'pending'));
   const actionCount = messages.flatMap((m) => m.actions ?? []).filter((a) => a.status !== 'running').length;
 
   useEffect(() => {
@@ -92,7 +93,7 @@ function Conversation({ sessionId }: { sessionId?: string }) {
   }, [messages.length, actionCount, streamed]);
 
   const send = async (text: string) => {
-    if (!text.trim() || running) return;
+    if (!text.trim() || running || !harness) return;
     setInput('');
     try {
       if (sessionId) {
@@ -128,7 +129,10 @@ function Conversation({ sessionId }: { sessionId?: string }) {
           {!sessionId && (
             <div className="chat-empty">
               <p className="serif">{t('整个书架，一起打理。')}</p>
-              <p className="muted">{t('助手能查看和整理书架里的所有论文，在 arXiv 上找相近的工作，也能批量生成内容。任何查询和改动都要先经过你批准。')}</p>
+              <p className="muted">
+                {t('助手能查看和整理书架里的所有论文，在 arXiv 上找相近的工作，也能批量生成内容。')}
+                {settings.assistant.autoApproveReads ? t('它改动书架之前会先征得你的同意。') : t('它查看或改动书架之前会先征得你的同意。')}
+              </p>
               <div className="chips">
                 {starters().map((s) => (
                   <button className="chip" key={s} disabled={!draftHarness} onClick={() => send(s)}>{s}</button>
@@ -152,10 +156,7 @@ function Conversation({ sessionId }: { sessionId?: string }) {
               {streamed ? (
                 <Markdown source={streamed} />
               ) : (
-                <div className="thinking">
-                  <span className="wave"><i /><i /><i /><i /></span>
-                  <span className="muted">{running.progress?.note ?? t('{agent} 正在思考', { agent: harness ?? 'AI' })}</span>
-                </div>
+                <Thinking text={running.progress?.note ?? t('{agent} 正在思考', { agent: harness ?? 'AI' })} />
               )}
             </div>
           )}
@@ -165,31 +166,23 @@ function Conversation({ sessionId }: { sessionId?: string }) {
       <div className="chat-input">
         <div className="assistant-column">
           {!sessionId && (
-            <div className="harness-picker">
-              <span className="muted small">Harness</span>
-              {!agents && <span className="muted small">{t('检测中')}</span>}
-              {installed?.map((id) => (
-                <button
-                  key={id}
-                  className={`chip ${draftHarness === id ? 'on' : ''}`}
-                  onClick={() => {
-                    setPicked(id);
-                    setDraftModel(null);
-                    setDraftThinking(null);
-                  }}
-                >
-                  {id}
-                </button>
-              ))}
-              {installed?.length === 0 && <span className="over small">{t('没有检测到本地 Harness，请安装 claude、codex 或 pi。')}</span>}
-            </div>
+            <HarnessPicker
+              installed={installed}
+              detecting={!agents}
+              value={draftHarness}
+              onChange={(id) => {
+                setPicked(id);
+                setDraftModel(null);
+                setDraftThinking(null);
+              }}
+            />
           )}
           <div className="chat-box">
             <textarea
               rows={2}
               autoFocus
               aria-label={t('问问助手')}
-              placeholder={t('问问助手，或让它做点什么')}
+              placeholder={waiting ? t('发送新消息会拒绝上面等待批准的操作') : t('问问助手，或让它做点什么')}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
@@ -271,17 +264,15 @@ function ApprovalCard({ sessionId, actions, locked }: { sessionId: string; actio
                   onChange={(e) => setSkipped(e.target.checked ? skipped.filter((id) => id !== a.id) : [...skipped, a.id])}
                 />
               )}
-              <span className="grow">
-                <b>{a.summary}</b>
-                <Details action={a} />
-              </span>
+              <b className="grow">{a.summary}</b>
             </label>
+            <Details action={a} />
           </li>
         ))}
       </ul>
       <div className="approval-actions">
         {onlyReads && (
-          <button className="btn ghost small" disabled={busy || locked} onClick={() => decide(actions.map((a) => a.id), true)}>
+          <button className="btn ghost small" disabled={busy || locked || !chosen.length} onClick={() => decide(chosen, true)}>
             {t('本次会话都允许查询')}
           </button>
         )}
@@ -351,13 +342,14 @@ function ActionRow({ action }: { action: AssistantAction }) {
 
 /** Clicking here is the user acting directly, so unlike the assistant's own requests it needs no approval step. */
 function Hit({ hit }: { hit: ArxivHit }) {
-  const [paperId, setPaperId] = useState(hit.paperId);
+  const [added, setAdded] = useState<string>();
+  const paperId = added ?? hit.paperId;
   const [busy, setBusy] = useState(false);
   const add = async () => {
     setBusy(true);
     try {
       const { paper, duplicate } = await api<{ paper: PaperSummary; duplicate: boolean }>('/papers/arxiv', { body: { input: hit.arxivId } });
-      setPaperId(paper.id);
+      setAdded(paper.id);
       toast(duplicate ? t('已经在库里：{title}', { title: paper.title }) : t('已导入：{title}', { title: paper.title }));
       bumpLibrary();
     } catch (err) {

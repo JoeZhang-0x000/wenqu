@@ -129,10 +129,12 @@ export function App() {
 function AssistantLink({ active }: { active: boolean }) {
   const { data: sessions } = useFetch<AssistantSessionMeta[]>('/assistant/sessions');
   const waiting = sessions?.find((s) => s.pending > 0);
+  const jobs = useStore(jobsStore);
+  const working = Object.values(jobs).some((j) => j.kind === 'assistant' && j.status === 'running');
   return (
     <a className={active ? 'on' : ''} href={waiting ? `#/assistant/${waiting.id}` : '#/assistant'} title={waiting ? t('有操作等待你批准') : undefined}>
       {t('助手')}
-      {waiting && <span className="dot nav-dot" aria-label={t('有操作等待你批准')} />}
+      {waiting ? <span className="dot nav-dot" aria-label={t('有操作等待你批准')} /> : working && <span className="dot live nav-dot" aria-label={t('助手正在工作')} />}
     </a>
   );
 }

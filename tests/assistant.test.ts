@@ -337,16 +337,28 @@ describe('Assistant', () => {
     });
 
     it('does not reveal what is in the library through a search until reads are allowed', async () => {
-      vi.mocked(deps.searchArxiv).mockResolvedValue([{ arxivId: '2401.00001v1', title: 'Mine', authors: [], paperId }]);
+      const mine = (await vault.importPdf(zh, 'x.pdf', { arxivId: '2401.00001v1' })).meta.id;
+      vi.mocked(deps.searchArxiv).mockResolvedValue([{ arxivId: '2401.00001v1', title: 'Mine', authors: [], paperId: mine }]);
       say(block({ tool: 'search_arxiv', args: { query: 'x' } }), 'Done.');
       const id = await start();
-      expect(requests[1].prompt).not.toContain(paperId);
-      expect(actionsOf(id)[0].hits?.[0].paperId).toBe(paperId);
+      expect(requests[1].prompt).not.toContain(mine);
+      expect(actionsOf(id)[0].hits?.[0].paperId).toBe(mine);
 
       settings.assistant.autoApproveReads = true;
       say(block({ tool: 'search_arxiv', args: { query: 'x' } }), 'Done.');
       await start();
-      expect(requests[3].prompt).toContain(paperId);
+      expect(requests[3].prompt).toContain(mine);
+    });
+
+    it('keeps search results current with the library', async () => {
+      vi.mocked(deps.searchArxiv).mockResolvedValue([{ arxivId: '2401.00001v1', title: 'Hit', authors: [] }]);
+      say(block({ tool: 'search_arxiv', args: { query: 'x' } }), 'Done.');
+      const id = await start();
+      expect(actionsOf(id)[0].hits?.[0].paperId).toBeUndefined();
+      const added = (await vault.importPdf(zh, 'x.pdf', { arxivId: '2401.00001v2' })).meta.id;
+      expect(actionsOf(id)[0].hits?.[0].paperId).toBe(added);
+      vault.trashPaper(added);
+      expect(actionsOf(id)[0].hits?.[0].paperId).toBeUndefined();
     });
 
     it('shows in full what an edit or a generation will use', async () => {

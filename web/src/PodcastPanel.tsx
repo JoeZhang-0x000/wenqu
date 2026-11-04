@@ -147,7 +147,7 @@ function ScriptStream({ job, agentName }: { job: Job; agentName: string }) {
           })}
         </div>
       ) : (
-        <Thinking label={agentName} />
+        <Thinking text={t('{agent} 正在阅读论文', { agent: agentName })} />
       )}
     </div>
   );
