@@ -49,7 +49,7 @@ Your browser opens automatically. Then:
 
 1. Open **Settings → Agent backend**, choose a backend, and click **Test** to confirm it works.
 2. Open **Settings → Voice API**, enter your Doubao API key, and click **Test connection**.
-3. Drag a PDF onto the page, or paste an arXiv link.
+3. Click **Add paper** to choose a PDF or paste arXiv links, or just drag a PDF onto the page.
 
 To use the `wenqu` command from any directory, also run `npm link`.
 

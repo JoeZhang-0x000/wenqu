@@ -1,6 +1,6 @@
 import { t } from '../shared/i18n.js';
-import type { PaperMeta } from '../shared/types.js';
-import type { Vault } from './vault.js';
+import type { ArxivLookup, ArxivMeta } from '../shared/types.js';
+import { withoutArxivVersion, type Vault } from './vault.js';
 
 const USER_AGENT = 'wenqu/0.1';
 const MAX_PDF_BYTES = 200 * 1024 * 1024;
@@ -40,12 +40,7 @@ const decodeXml = (text: string) =>
 const tag = (xml: string, name: string) => xml.match(new RegExp(`<${name}\\b[^>]*>([\\s\\S]*?)</${name}>`))?.[1];
 const clean = (text: string | undefined) => (text === undefined ? undefined : decodeXml(text).replace(/\s+/g, ' ').trim());
 
-export type ArxivMeta = Required<Pick<PaperMeta, 'title' | 'authors' | 'arxivId'>> & Pick<PaperMeta, 'year' | 'abstract'>;
-
-/** Parses one entry from the arXiv Atom API. Returns null if the feed has none. */
-export function parseArxivFeed(xml: string): ArxivMeta | null {
-  const entry = tag(xml, 'entry');
-  if (!entry) return null;
+function parseEntry(entry: string): ArxivMeta | null {
   const title = clean(tag(entry, 'title'));
   const arxivId = clean(tag(entry, 'id'))?.match(/abs\/(.+)$/)?.[1];
   if (!title || !arxivId) return null;
@@ -62,8 +57,18 @@ export function parseArxivFeed(xml: string): ArxivMeta | null {
   };
 }
 
-async function request(url: string, signal?: AbortSignal): Promise<Response> {
-  const timeout = AbortSignal.timeout(180_000);
+/** Parses every entry in an arXiv Atom feed. */
+export function parseArxivEntries(xml: string): ArxivMeta[] {
+  return [...xml.matchAll(/<entry\b[^>]*>([\s\S]*?)<\/entry>/g)].map((m) => parseEntry(m[1])).filter((e): e is ArxivMeta => Boolean(e));
+}
+
+/** Parses one entry from the arXiv Atom API. Returns null if the feed has none. */
+export function parseArxivFeed(xml: string): ArxivMeta | null {
+  return parseArxivEntries(xml)[0] ?? null;
+}
+
+async function request(url: string, signal?: AbortSignal, timeoutMs = 180_000): Promise<Response> {
+  const timeout = AbortSignal.timeout(timeoutMs);
   try {
     return await fetch(url, {
       headers: { 'User-Agent': USER_AGENT },
@@ -76,8 +81,25 @@ async function request(url: string, signal?: AbortSignal): Promise<Response> {
   }
 }
 
+/** arXiv asks API clients to leave three seconds between requests. */
+const API_SPACING_MS = 3000;
+let nextApiSlot = 0;
+
+export function resetApiPacing(): void {
+  nextApiSlot = 0;
+}
+
+/** Queues the call for its turn, which also spaces out the imports in a batch. */
+async function apiRequest(url: string, timeoutMs?: number): Promise<Response> {
+  const now = Date.now();
+  const wait = Math.max(0, nextApiSlot - now);
+  nextApiSlot = Math.max(now, nextApiSlot) + API_SPACING_MS;
+  if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
+  return request(url, undefined, timeoutMs);
+}
+
 async function fetchMeta(id: string): Promise<ArxivMeta | null> {
-  const res = await request(`https://export.arxiv.org/api/query?id_list=${encodeURIComponent(id)}`);
+  const res = await apiRequest(`https://export.arxiv.org/api/query?id_list=${encodeURIComponent(id)}`);
   if (!res.ok) throw new Error(t('arXiv API 返回 {status}', { status: res.status }));
   return parseArxivFeed(await res.text());
 }
@@ -94,6 +116,39 @@ async function fetchPdf(id: string): Promise<Buffer> {
     chunks.push(Buffer.from(chunk));
   }
   return Buffer.concat(chunks);
+}
+
+/** A preview that takes longer than this is no longer worth waiting for. */
+const LOOKUP_TIMEOUT_MS = 10_000;
+
+/**
+ * What each input refers to, before anything is downloaded. The metadata is only a
+ * preview, so when arXiv can't be reached the ids still come back and can be imported.
+ */
+export async function lookupArxiv(vault: Vault, inputs: string[]): Promise<ArxivLookup[]> {
+  const papers = vault.listPapers();
+  const results: ArxivLookup[] = inputs.map((input) => {
+    const id = parseArxivInput(input);
+    return { input, id, paperId: id ? vault.findArxiv(id, papers)?.id : undefined, status: id ? 'unknown' : 'invalid' };
+  });
+  const ids = [...new Set(results.flatMap((r) => (r.id ? [r.id] : [])))];
+  if (!ids.length) return results;
+  try {
+    const res = await apiRequest(`https://export.arxiv.org/api/query?id_list=${ids.map(encodeURIComponent).join(',')}&max_results=${ids.length}`, LOOKUP_TIMEOUT_MS);
+    if (!res.ok) return results;
+    const entries = parseArxivEntries(await res.text());
+    for (const result of results) {
+      if (!result.id) continue;
+      // Two versions of a paper can be asked for together, and arXiv picks the order.
+      const base = withoutArxivVersion(result.id);
+      const entry = entries.find((e) => e.arxivId === result.id) ?? entries.find((e) => withoutArxivVersion(e.arxivId) === base);
+      result.status = entry ? 'found' : 'missing';
+      if (entry) result.meta = entry;
+    }
+  } catch {
+    /* Only the preview is lost. */
+  }
+  return results;
 }
 
 export async function importArxiv(vault: Vault, input: string) {
