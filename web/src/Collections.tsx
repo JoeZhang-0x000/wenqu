@@ -1,4 +1,4 @@
-import { ArrowLeft, AudioLines, Check, FileText, Pencil, Trash2, X } from 'lucide-react';
+import { ArrowLeft, AudioLines, BookOpen, Check, FileText, Pencil, Trash2, X } from 'lucide-react';
 import { t } from '../../src/shared/i18n';
 import { useEffect, useState } from 'react';
 import type { CollectionSummary, PaperSummary } from '../../src/shared/types';
@@ -42,7 +42,9 @@ export function Collections() {
   );
 }
 
-type Tab = 'blog' | 'podcast';
+type View = 'papers' | 'blog' | 'podcast';
+
+const toView = (tab?: string): View => (tab === 'blog' || tab === 'podcast' ? tab : 'papers');
 
 export function CollectionView({
   id,
@@ -59,12 +61,12 @@ export function CollectionView({
   const { data: allPapers } = useFetch<PaperSummary[]>('/papers');
   const settings = useStore(settingsStore)!;
   const jobs = useStore(jobsStore);
-  const [tab, setTab] = useState<Tab>((routeTab as Tab) || 'podcast');
+  const [view, setViewState] = useState<View>(toView(routeTab));
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState('');
 
   useEffect(() => {
-    if (routeTab) setTab(routeTab as Tab);
+    if (routeTab) setViewState(toView(routeTab));
   }, [routeTab, item]);
 
   if (error) {
@@ -82,6 +84,11 @@ export function CollectionView({
   const busy = (kinds: string[]) => Object.values(jobs).some((j) => j.paperId === id && j.status === 'running' && kinds.includes(j.kind));
   const candidates = (allPapers ?? []).filter((p) => !collection.paperIds.includes(p.id));
 
+  const setView = (next: View) => {
+    setViewState(next);
+    history.replaceState(null, '', `#/collection/${id}${next === 'papers' ? '' : `?tab=${next}`}`);
+  };
+
   const patch = async (body: { title?: string; paperIds?: string[] }) => {
     try {
       setData(await api<CollectionSummary>(`/collections/${id}`, { method: 'PATCH', body }));
@@ -94,6 +101,11 @@ export function CollectionView({
     <div className="reader">
       <div className="reader-bar">
         <a className="icon" href="#/collections" title={t('返回合集')}><ArrowLeft size={17} /></a>
+        <div className="view-tabs" role="tablist">
+          <TabButton<View> id="papers" tab={view} setTab={setView} busy={false}><BookOpen size={14} />{t('论文')}</TabButton>
+          <TabButton<View> id="podcast" tab={view} setTab={setView} busy={busy(['script', 'synth'])}><AudioLines size={14} />{t('播客')}</TabButton>
+          <TabButton<View> id="blog" tab={view} setTab={setView} busy={busy(['blog'])}><FileText size={14} />{t('博客')}</TabButton>
+        </div>
         {editing ? (
           <form
             className="title-edit"
@@ -134,51 +146,57 @@ export function CollectionView({
         </button>
       </div>
       <div className="reader-main">
-        <div className="collection-main">
-          <p className="muted">{t('已经生成的内容不会因为增减论文而改变，新生成的内容才会用到最新的列表。')}</p>
-          {collection.papers.map((paper, i) => (
-            <div className="member" key={paper.id}>
-              <span className="member-n mono">{i + 1}</span>
-              <PaperCover paper={paper} />
-              <div className="member-body">
-                <a className="member-title serif" href={paperHref(paper.id)}>{paper.title}</a>
-                <div className="muted small">
-                  {paper.authors.slice(0, 3).join(', ')}{paper.authors.length > 3 ? t(' 等') : ''}
-                  {paper.year ? ` · ${paper.year}` : ''} · {t('{count} 页', { count: paper.pages })}
+        {view === 'papers' && (
+          <div className="collection-main">
+            <p className="muted">{t('已经生成的内容不会因为增减论文而改变，新生成的内容才会用到最新的列表。')}</p>
+            {collection.papers.map((paper, i) => (
+              <div className="member" key={paper.id}>
+                <span className="member-n mono">{i + 1}</span>
+                <PaperCover paper={paper} />
+                <div className="member-body">
+                  <a className="member-title serif" href={paperHref(paper.id)}>{paper.title}</a>
+                  <div className="muted small">
+                    {paper.authors.slice(0, 3).join(', ')}{paper.authors.length > 3 ? t(' 等') : ''}
+                    {paper.year ? ` · ${paper.year}` : ''} · {t('{count} 页', { count: paper.pages })}
+                  </div>
+                  {paper.textChars < 50 && <div className="over small">{t('没有可提取的文字，生成时会跳过这篇')}</div>}
+                  {paper.abstract && <div className="member-abstract">{paper.abstract}</div>}
                 </div>
-                {paper.textChars < 50 && <div className="over small">{t('没有可提取的文字，生成时会跳过这篇')}</div>}
-                {paper.abstract && <div className="member-abstract">{paper.abstract}</div>}
+                <button
+                  className="icon"
+                  title={t('从合集移除')}
+                  disabled={collection.papers.length <= 2}
+                  onClick={() => patch({ paperIds: collection.paperIds.filter((p) => p !== paper.id) })}
+                >
+                  <X size={15} />
+                </button>
               </div>
-              <button
-                className="icon"
-                title={t('从合集移除')}
-                disabled={collection.papers.length <= 2}
-                onClick={() => patch({ paperIds: collection.paperIds.filter((p) => p !== paper.id) })}
+            ))}
+            {candidates.length > 0 && (
+              <select
+                className="member-add"
+                aria-label={t('添加论文到合集')}
+                value=""
+                onChange={(e) => e.target.value && patch({ paperIds: [...collection.paperIds, e.target.value] })}
               >
-                <X size={15} />
-              </button>
-            </div>
-          ))}
-          {candidates.length > 0 && (
-            <select
-              className="member-add"
-              aria-label={t('添加论文到合集')}
-              value=""
-              onChange={(e) => e.target.value && patch({ paperIds: [...collection.paperIds, e.target.value] })}
-            >
-              <option value="">{t('添加论文…')}</option>
-              {candidates.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}
-            </select>
-          )}
-        </div>
-        <aside className="side" style={{ width: 'min(520px, 50vw)' }}>
-          <div className="tabs" role="tablist">
-            <TabButton<Tab> id="podcast" tab={tab} setTab={setTab} busy={busy(['script', 'synth'])}><AudioLines size={15} />{t('播客')}</TabButton>
-            <TabButton<Tab> id="blog" tab={tab} setTab={setTab} busy={busy(['blog'])}><FileText size={15} />{t('博客')}</TabButton>
-            <div className="spacer" />
-            <button className="agent-pill mono" title={t('更换 Agent 后端')} onClick={() => onOpenSettings()}>{backend}</button>
+                <option value="">{t('添加论文…')}</option>
+                {candidates.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}
+              </select>
+            )}
           </div>
-          {tab === 'blog' && (
+        )}
+        {view === 'podcast' && (
+          <div className="main-view">
+            <PodcastPanel
+              paperId={id}
+              initialItem={routeTab === 'podcast' ? item : undefined}
+              agentName={agentName}
+              onOpenSettings={() => onOpenSettings('api')}
+            />
+          </div>
+        )}
+        {view === 'blog' && (
+          <div className="main-view">
             <BlogPanel
               paperId={id}
               initialItem={routeTab === 'blog' ? item : undefined}
@@ -187,16 +205,8 @@ export function CollectionView({
                 if (sourcePaper) location.hash = paperHref(sourcePaper, undefined, undefined, page);
               }}
             />
-          )}
-          {tab === 'podcast' && (
-            <PodcastPanel
-              paperId={id}
-              initialItem={routeTab === 'podcast' ? item : undefined}
-              agentName={agentName}
-              onOpenSettings={() => onOpenSettings('api')}
-            />
-          )}
-        </aside>
+          </div>
+        )}
       </div>
     </div>
   );

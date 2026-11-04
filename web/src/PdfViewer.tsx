@@ -16,10 +16,12 @@ export interface SelectionAsk {
 interface Props {
   url: string;
   initialPage?: number;
+  /** Hides the viewer without losing the document or the scroll position. */
+  hidden?: boolean;
   onAsk(ask: SelectionAsk): void;
 }
 
-export const PdfViewer = forwardRef<PdfHandle, Props>(function PdfViewer({ url, initialPage, onAsk }, ref) {
+export const PdfViewer = forwardRef<PdfHandle, Props>(function PdfViewer({ url, initialPage, hidden, onAsk }, ref) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<any>(null);
@@ -82,6 +84,8 @@ export const PdfViewer = forwardRef<PdfHandle, Props>(function PdfViewer({ url, 
         if (e.matchesCount) setMatches(e.matchesCount);
       });
       observer = new ResizeObserver(() => {
+        // A hidden container has no width to fit to.
+        if (!containerRef.current?.clientWidth) return;
         if (['page-width', 'page-fit'].includes(viewer.currentScaleValue)) viewer.currentScaleValue = viewer.currentScaleValue;
       });
       observer.observe(containerRef.current);
@@ -150,7 +154,7 @@ export const PdfViewer = forwardRef<PdfHandle, Props>(function PdfViewer({ url, 
   };
 
   return (
-    <div className={`pdf ${night ? 'pdf-night' : ''}`} ref={wrapRef}>
+    <div className={`pdf ${night ? 'pdf-night' : ''}`} ref={wrapRef} style={hidden ? { display: 'none' } : undefined}>
       <div className="pdf-bar">
         <div className="pdf-pager">
           <input

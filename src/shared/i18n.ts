@@ -5,6 +5,7 @@
  */
 const en = {
   // Library and navigation
+  论文: 'Paper',
   书架: 'Library',
   合集: 'Collections',
   作品: 'Outputs',

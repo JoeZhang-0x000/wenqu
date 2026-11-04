@@ -1,14 +1,16 @@
-import { ArrowLeft, AudioLines, Check, ExternalLink, FileText, FolderOpen, MessagesSquare, Pencil, Trash2, X } from 'lucide-react';
+import { ArrowLeft, AudioLines, BookOpen, Check, ExternalLink, FileText, FolderOpen, Pencil, Trash2, X } from 'lucide-react';
 import { t } from '../../src/shared/i18n';
 import { useEffect, useRef, useState } from 'react';
 import type { PaperSummary } from '../../src/shared/types';
 import { BlogPanel } from './BlogPanel';
 import { ChatPanel } from './ChatPanel';
-import { api, bumpLibrary, confirmAction, fail, jobsStore, player, playerStore, settingsStore, toast, useFetch, useStore } from './lib';
+import { api, bumpLibrary, confirmAction, fail, jobsStore, paperHref, player, playerStore, settingsStore, toast, useFetch, useStore } from './lib';
 import { PdfViewer, type PdfHandle, type SelectionAsk } from './PdfViewer';
 import { PodcastPanel } from './PodcastPanel';
 
-type Tab = 'chat' | 'blog' | 'podcast';
+type View = 'paper' | 'blog' | 'podcast';
+
+const toView = (tab?: string): View => (tab === 'blog' || tab === 'podcast' ? tab : 'paper');
 
 const readWidth = () => {
   try {
@@ -34,7 +36,7 @@ export function Reader({
   const { data: paper, error, setData } = useFetch<PaperSummary>(`/papers/${paperId}`);
   const settings = useStore(settingsStore)!;
   const jobs = useStore(jobsStore);
-  const [tab, setTab] = useState<Tab>((routeTab as Tab) || 'chat');
+  const [view, setViewState] = useState<View>(toView(routeTab));
   const [ask, setAsk] = useState<(SelectionAsk & { nonce: number }) | null>(null);
   const [width, setWidth] = useState(readWidth);
   const [editing, setEditing] = useState(false);
@@ -43,8 +45,14 @@ export function Reader({
   const nonce = useRef(0);
 
   useEffect(() => {
-    if (routeTab) setTab(routeTab as Tab);
+    if (routeTab) setViewState(toView(routeTab));
   }, [routeTab, item]);
+
+  // Keeps the view across a reload, without adding to the browser history.
+  const setView = (next: View) => {
+    setViewState(next);
+    history.replaceState(null, '', paperHref(paperId, next === 'paper' ? undefined : next));
+  };
 
   useEffect(() => {
     if (at) pdfRef.current?.goToPage(at);
@@ -62,7 +70,11 @@ export function Reader({
 
   const backend = settings.agent.backend;
   const agentName = settings.agent.models[backend] ? `${backend} · ${settings.agent.models[backend]}` : backend;
-  const goToPage = (page: number) => pdfRef.current?.goToPage(page);
+  const goToPage = (page: number) => {
+    setView('paper');
+    // The PDF has to be visible before it can scroll.
+    requestAnimationFrame(() => pdfRef.current?.goToPage(page));
+  };
   const noText = paper.textChars < 50;
   const busy = (kind: string[]) => Object.values(jobs).some((j) => j.paperId === paperId && j.status === 'running' && kind.includes(j.kind));
 
@@ -94,6 +106,11 @@ export function Reader({
     <div className="reader">
       <div className="reader-bar">
         <a className="icon" href="#/" title={t('返回书架')}><ArrowLeft size={17} /></a>
+        <div className="view-tabs" role="tablist">
+          <TabButton<View> id="paper" tab={view} setTab={setView} busy={false}><BookOpen size={14} />{t('论文')}</TabButton>
+          <TabButton<View> id="blog" tab={view} setTab={setView} busy={busy(['blog'])}><FileText size={14} />{t('博客')}</TabButton>
+          <TabButton<View> id="podcast" tab={view} setTab={setView} busy={busy(['script', 'synth'])}><AudioLines size={14} />{t('播客')}</TabButton>
+        </div>
         {editing ? (
           <form
             className="title-edit"
@@ -148,35 +165,39 @@ export function Reader({
         </button>
       </div>
       <div className="reader-main">
+        {/* The PDF stays mounted, so the reading position survives switching views. */}
         <PdfViewer
           ref={pdfRef}
           url={`/api/papers/${paperId}/pdf`}
           initialPage={at}
-          onAsk={(next) => {
-            setTab('chat');
-            setAsk({ ...next, nonce: ++nonce.current });
-          }}
+          hidden={view !== 'paper'}
+          onAsk={(next) => setAsk({ ...next, nonce: ++nonce.current })}
         />
-        <div className="splitter" onPointerDown={startResize} />
-        <aside className="side" style={{ width }}>
-          <div className="tabs" role="tablist">
-            <TabButton<Tab> id="chat" tab={tab} setTab={setTab} busy={busy(['chat'])}><MessagesSquare size={15} />{t('问答')}</TabButton>
-            <TabButton<Tab> id="blog" tab={tab} setTab={setTab} busy={busy(['blog'])}><FileText size={15} />{t('博客')}</TabButton>
-            <TabButton<Tab> id="podcast" tab={tab} setTab={setTab} busy={busy(['script', 'synth'])}><AudioLines size={15} />{t('播客')}</TabButton>
-            <div className="spacer" />
-            <button className="agent-pill mono" title={t('更换 Agent 后端')} onClick={() => onOpenSettings()}>{backend}</button>
+        {view === 'blog' && (
+          <div className="main-view">
+            <BlogPanel paperId={paperId} initialItem={routeTab === 'blog' ? item : undefined} onCite={goToPage} agentName={agentName} />
           </div>
-          {noText && <div className="notice err tight">{t('这份 PDF 没有可提取的文字（可能是扫描件），AI 功能暂时无法使用。')}</div>}
-          {tab === 'chat' && <ChatPanel paperId={paperId} ask={ask} onCite={goToPage} agentName={agentName} />}
-          {tab === 'blog' && <BlogPanel paperId={paperId} initialItem={routeTab === 'blog' ? item : undefined} onCite={goToPage} agentName={agentName} />}
-          {tab === 'podcast' && (
+        )}
+        {view === 'podcast' && (
+          <div className="main-view">
             <PodcastPanel
               paperId={paperId}
               initialItem={routeTab === 'podcast' ? item : undefined}
               agentName={agentName}
               onOpenSettings={() => onOpenSettings('api')}
             />
-          )}
+          </div>
+        )}
+        <div className="splitter" onPointerDown={startResize} />
+        <aside className="side" style={{ width }}>
+          <div className="side-head">
+            <b>{t('问答')}</b>
+            {busy(['chat']) && <span className="dot live" />}
+            <div className="spacer" />
+            <button className="agent-pill mono" title={t('更换 Agent 后端')} onClick={() => onOpenSettings()}>{backend}</button>
+          </div>
+          {noText && <div className="notice err tight">{t('这份 PDF 没有可提取的文字（可能是扫描件），AI 功能暂时无法使用。')}</div>}
+          <ChatPanel paperId={paperId} ask={ask} onCite={goToPage} agentName={agentName} />
         </aside>
       </div>
     </div>
