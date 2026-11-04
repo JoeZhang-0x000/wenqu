@@ -1,0 +1,408 @@
+/**
+ * Interface text is written in Chinese in the code, and that text is also the key.
+ * Each key needs an English entry below, and calling t() with an unknown key is a
+ * type error, so a string can't ship untranslated by accident.
+ */
+const en = {
+  // Library and navigation
+  书架: 'Library',
+  合集: 'Collections',
+  作品: 'Outputs',
+  设置: 'Settings',
+  全部: 'All',
+  有播客: 'With podcast',
+  有博客: 'With blog',
+  未生成: 'Nothing generated',
+  添加论文: 'Add paper',
+  '只支持 PDF 文件': 'Only PDF files are supported',
+  已移到回收站: "Moved to the vault's trash",
+  做合集: 'Make collection',
+  创建合集: 'Create collection',
+  '选择几篇论文，做成一个合集': 'Select a few papers to make a collection',
+  至少选择两篇: 'Select at least two',
+  合集名称: 'Collection name',
+  '本周论文 {date}': 'Weekly digest {date}',
+  把第一篇论文拖进来: 'Drop your first paper here',
+  '或者点击选择 PDF。也可以在终端运行': 'Or click to choose a PDF. You can also run this in a terminal:',
+  '没有符合条件的论文。': 'No papers match.',
+  '搜索标题、作者、摘要': 'Search title, authors, abstract',
+  'arXiv 链接或编号': 'arXiv link or ID',
+  '粘贴 arXiv 链接或编号，回车导入': 'Paste an arXiv link or ID',
+  '正在从 arXiv 下载': 'Downloading from arXiv',
+  '已导入：{title}': 'Imported: {title}',
+  '已经在库里：{title}': 'Already in your library: {title}',
+  '松手，把论文放进书架': 'Drop to add to your library',
+  ' 等': ' et al.',
+  '{count} 期播客': 'Podcasts: {count}',
+  '{count} 篇博客': 'Blog posts: {count}',
+  '{count} 篇': '{count} selected',
+  '{count} 篇论文': 'Papers: {count}',
+  '{count} 页': '{count} pages',
+  '{count} 个任务': 'Tasks: {count}',
+  '{count} 字符': '{count} characters',
+  '{count} 轮': '{count} turns',
+  '共 {count} 轮': '{count} turns in total',
+
+  // Outputs
+  博客: 'Blog',
+  播客: 'Podcast',
+  搜索作品或论文: 'Search outputs or papers',
+  '还没有生成内容。打开一篇论文，在右侧开始生成。': 'Nothing generated yet. Open a paper and start from the right-hand panel.',
+  待合成: 'Script ready',
+  合成中: 'Synthesizing',
+  失败: 'Failed',
+  脚本: 'Script',
+
+  // Reader
+  返回书架: 'Back to library',
+  修改标题: 'Edit title',
+  论文标题: 'Paper title',
+  保存: 'Save',
+  取消: 'Cancel',
+  在文件管理器中显示: 'Show in file manager',
+  '在 arXiv 上打开': 'Open on arXiv',
+  删除论文: 'Delete paper',
+  删除: 'Delete',
+  确定: 'OK',
+  '把这篇论文和它生成的所有内容移到 Vault 回收站？': "Move this paper and everything generated from it to the vault's trash?",
+  '把「{title}」移到 Vault 回收站？': "Move “{title}” to the vault's trash?",
+  问答: 'Ask',
+  '更换 Agent 后端': 'Change agent backend',
+  '这份 PDF 没有可提取的文字（可能是扫描件），AI 功能暂时无法使用。':
+    "This PDF has no extractable text (it may be a scan), so AI features aren't available.",
+
+  // PDF viewer
+  页码: 'Page number',
+  缩小: 'Zoom out',
+  放大: 'Zoom in',
+  适应宽度: 'Fit width',
+  夜读模式: 'Night reading',
+  在论文中搜索: 'Search in paper',
+  上一个: 'Previous',
+  下一个: 'Next',
+  关闭搜索: 'Close search',
+  提问: 'Ask',
+  解释: 'Explain',
+  翻译: 'Translate',
+  '解释这段内容在论文中的含义，必要时补充背景。':
+    'Explain what this passage means in the context of the paper, adding background where needed.',
+  '把这段翻译成中文，保留术语原文。如果原文已是中文，则翻译成英文。':
+    'Translate this passage into English, keeping technical terms in their original form. If it is already in English, translate it into Chinese.',
+  '无法打开 PDF：{error}': "Can't open the PDF: {error}",
+  无法生成封面: "Can't generate a cover",
+
+  // Chat
+  一句话总结这篇论文: 'Summarize this paper in one sentence',
+  '核心贡献是什么？': 'What are the main contributions?',
+  '方法的关键步骤是什么？': 'What are the key steps of the method?',
+  '有哪些局限和未解决的问题？': 'What are the limitations and open problems?',
+  '读到哪里，问到哪里。': 'Ask as you read.',
+  '回答基于全文并标注页码，点击页码可跳转。也可以在左侧选中一段文字直接提问。':
+    'Answers draw on the full text and cite pages you can click. You can also select a passage on the left to ask about it.',
+  针对这段文字提问: 'Ask about this passage',
+  '问问 {agent}': 'Ask {agent}',
+  移除引用: 'Remove quote',
+  清空对话: 'Clear conversation',
+  '清空这篇论文的对话记录？': 'Clear the conversation for this paper?',
+  清空: 'Clear',
+  停止: 'Stop',
+  发送: 'Send',
+  '{agent} 正在阅读论文': '{agent} is reading the paper',
+
+  // Blog
+  新博客: 'New post',
+  生成中: 'Generating',
+  把这篇论文写成博客: 'Turn this paper into a blog post',
+  把这个合集写成博客: 'Turn this collection into a blog post',
+  形式: 'Format',
+  风格: 'Style',
+  语言: 'Language',
+  自定义风格: 'Custom style',
+  '自定义…': 'Custom…',
+  自定义: 'Custom',
+  '描述你想要的文风、读者和结构': 'Describe the tone, audience and structure you want',
+  '额外要求（可选）': 'Extra instructions (optional)',
+  '例如：重点讲第三章的实验，并和 BERT 做对比': 'For example: focus on the experiments in section 3 and compare with BERT',
+  插入论文图表: "Insert the paper's figures",
+  '会从每篇论文中提取带图注的图表，由 Agent 根据图注挑选。':
+    'Captioned figures are extracted from each paper, and the agent chooses from their captions.',
+  '上次生成失败：{error}': 'The last attempt failed: {error}',
+  开始生成: 'Generate',
+  正在检测论文图表: 'Detecting figures',
+  '当前环境缺少 @napi-rs/canvas，无法提取图表。': "Figures can't be extracted because @napi-rs/canvas isn't available.",
+  '没有检测到带图注的图表，这篇博客只会有文字。': 'No captioned figures found, so this post will be text only.',
+  '检测到 {count} 张，由 Agent 根据图注挑选。裁剪不对的可以移除。':
+    'Found: {count}. The agent chooses from their captions. Remove any bad crops.',
+  '移除 {label}': 'Remove {label}',
+  编辑: 'Edit',
+  '复制 Markdown': 'Copy Markdown',
+  '已复制 Markdown': 'Markdown copied',
+  '下载 .md（图片内嵌）': 'Download .md (images embedded)',
+  已保存: 'Saved',
+
+  // Podcast
+  新一期: 'New episode',
+  正在写脚本: 'Writing the script',
+  '合成音频需要豆包语音 API Key。脚本可以先写好。': 'Synthesizing audio needs a Doubao Speech API key. You can write the script first.',
+  去设置: 'Open settings',
+  做一期播客: 'Make an episode',
+  把这个合集做成一期播客: 'Turn this collection into an episode',
+  'Agent 写稿': 'Agent script',
+  豆包直出: 'Doubao direct',
+  '可选语言和风格，能修改脚本': 'Choose language and style, and edit the script',
+  '由豆包总结生成，不需要 Agent': "Summarized by Doubao, with no agent needed",
+  时长: 'Length',
+  '豆包直出不支持指定风格和时长，只取论文前 20,000 字符。':
+    "Doubao direct can't set style or length, and only uses the first 20,000 characters of the paper.",
+  主播: 'Hosts',
+  '例如：多讲实验设计，少讲相关工作': 'For example: more on experiment design, less on related work',
+  '描述主持人的关系、语气和节奏': "Describe the hosts' relationship, tone and pace",
+  写完脚本后直接合成音频: 'Synthesize audio as soon as the script is ready',
+  开始写脚本: 'Write script',
+  修改脚本后重新合成: 'Edit the script and synthesize again',
+  '下载 MP3': 'Download MP3',
+  正在合成: 'Synthesizing',
+  '可以关闭这个页面，合成会在后台继续，完成后可在这里收听。':
+    'You can close this page. Synthesis continues in the background, and the episode will be here when it finishes.',
+  暂停: 'Pause',
+  播放: 'Play',
+  '论文内容超过豆包的输入上限，生成时被截断了。': "The paper exceeded Doubao's input limit, so it was truncated.",
+  脚本为空: 'The script is empty',
+  '总长超过 {limit} 字符': 'Over the {limit}-character limit',
+  '第 {round} 轮超过 {limit} 字符': 'Turn {round} is over {limit} characters',
+  '合成失败：{error}': 'Synthesis failed: {error}',
+  '（这一期没有脚本可以重试，请新建一期。）': '(This episode has no script to retry. Please create a new one.)',
+  标题: 'Title',
+  '语速 {value}': 'Speech rate {value}',
+  片头音乐: 'Intro music',
+  片尾音乐: 'Outro music',
+  切换主播: 'Switch host',
+  在下方插入一轮: 'Insert a turn below',
+  删除这一轮: 'Delete this turn',
+  合成音频: 'Synthesize audio',
+
+  // Player
+  '后退 15 秒': 'Back 15 seconds',
+  '前进 15 秒': 'Forward 15 seconds',
+  播放进度: 'Playback position',
+  播放速度: 'Playback speed',
+  关闭播放器: 'Close player',
+  音频加载失败: "The audio couldn't be loaded",
+
+  // Collections
+  '把几篇论文放在一起，做成“本周论文”或小型综述。': 'Put a few papers together to make a weekly digest or a mini review.',
+  去书架开始: 'Start from the library',
+  返回合集: 'Back to collections',
+  修改名称: 'Rename',
+  删除合集: 'Delete collection',
+  '把这个合集和它生成的内容移到 Vault 回收站？论文本身不受影响。':
+    "Move this collection and what it generated to the vault's trash? The papers themselves aren't affected.",
+  '已经生成的内容不会因为增减论文而改变，新生成的内容才会用到最新的列表。':
+    "Changing the papers doesn't affect existing outputs. Only new outputs use the updated list.",
+  '没有可提取的文字，生成时会跳过这篇': 'No extractable text, so this paper will be skipped',
+  从合集移除: 'Remove from collection',
+  添加论文到合集: 'Add a paper to the collection',
+  '添加论文…': 'Add a paper…',
+
+  // Presets
+  轻松对谈: 'Casual chat',
+  '两位朋友聊论文，有来有回': 'Two friends talking through the paper',
+  深度解析: 'Deep dive',
+  '面向同行，讲清方法和细节': 'For peers, with methods and details',
+  观点交锋: 'Debate',
+  '一方支持，一方质疑': 'One host argues for it, one questions it',
+  零基础科普: 'Beginner-friendly',
+  不需要任何背景知识: 'No background needed',
+  快讯简报: 'News brief',
+  只讲结论和为什么重要: 'Just the findings and why they matter',
+  深度解读: 'In-depth explainer',
+  结构完整的长文: 'A well-structured long read',
+  通俗科普: 'Popular science',
+  给非专业读者: 'For non-experts',
+  工程师视角: "Engineer's view",
+  '能怎么用、怎么复现': 'How to use and reproduce it',
+  批判性评论: 'Critical review',
+  方法与证据的审视: 'Examines methods and evidence',
+  社交媒体短文: 'Short social post',
+  '短小、适合转发': 'Short and shareable',
+  '约 5 分钟': 'About 5 minutes',
+  '约 10 分钟': 'About 10 minutes',
+  '约 20 分钟': 'About 20 minutes',
+  '大义先生 × 咪仔同学': 'Dayi × Mizai',
+  '刘飞 × 潇磊': 'Liu Fei × Xiaolei',
+  本周论文: 'Weekly digest',
+  '逐篇讲，串成一期': 'Covers the papers one at a time',
+  小型综述: 'Mini review',
+  '按主题组织，比较异同': 'Organized by theme, comparing across papers',
+
+  // Settings
+  通用: 'General',
+  'Agent 后端': 'Agent backend',
+  '语音 API': 'Voice API',
+  关闭: 'Close',
+  '界面和错误提示使用的语言。生成内容的语言在播客和博客里单独设置。':
+    'The language for the interface and error messages. The language of generated content is set separately under Podcast and Blog.',
+  界面语言: 'Interface language',
+  跟随浏览器: 'Same as browser',
+  '留空使用默认，如 sonnet': 'Leave empty for the default, or enter a model such as sonnet',
+  留空使用默认: 'Leave empty for the default',
+  '留空使用 pi 的默认模型': "Leave empty for pi's default model",
+  '问答、博客和播客脚本都由本机的命令行 Agent 完成，并使用它自己的登录状态。论文内容被当作不可信数据：Claude 和 pi 运行时禁用所有工具，Codex 运行在只读沙箱中。':
+    'Questions, blog posts and podcast scripts are handled by a command-line agent on this machine, using its own login. Paper content is treated as untrusted: Claude and pi run with all tools disabled, and Codex runs in a read-only sandbox.',
+  检测中: 'Checking',
+  未安装: 'Not installed',
+  测试: 'Test',
+  '可用，耗时 {seconds} 秒': 'Working ({seconds} s)',
+  '{name} 模型': '{name} model',
+  播客默认设置: 'Podcast defaults',
+  '新建一期时预先填好这些选项，单期仍可修改。': 'These options are filled in for each new episode, and you can still change them there.',
+  默认语言: 'Default language',
+  '豆包目前只有中文音色，其他语言的发音效果请先试听。':
+    'Doubao currently only has Chinese voices, so listen to a sample before relying on other languages.',
+  默认时长: 'Default length',
+  默认风格: 'Default style',
+  默认生成方式: 'Default method',
+  '可选语言风格，能修改脚本': 'Choose language and style, and edit the script',
+  '不需要 Agent': 'No agent needed',
+  默认主播: 'Default hosts',
+  '同一系列的音色配对效果更好。': 'Voices from the same series work best together.',
+  博客默认设置: 'Blog defaults',
+  '新建博客时预先填好这些选项，单篇仍可修改。': 'These options are filled in for each new post, and you can still change them there.',
+  豆包语音: 'Doubao Speech',
+  '合成音频前需要先配置。': 'Required before synthesizing audio.',
+  '在火山引擎控制台开通语音播客服务后获取 API Key。': 'Enable the podcast service in the Volcengine console to get an API key.',
+  'Key 只保存在本机配置文件中，不会写入 Vault。': 'The key is only stored in a config file on this machine, never in the vault.',
+  '当前由环境变量 DOUBAO_API_KEY 提供，它的优先级高于这里的设置。':
+    'Currently provided by the DOUBAO_API_KEY environment variable, which takes precedence over this setting.',
+  '已配置 {preview}，留空表示不修改。': 'Set to {preview}. Leave empty to keep it.',
+  '粘贴 API Key': 'Paste your API key',
+  '一般不需要修改。': 'You rarely need to change this.',
+  '保存 Key': 'Save key',
+  'API Key 已保存': 'API key saved',
+  测试连接: 'Test connection',
+  '移除 Key': 'Remove key',
+  '连接正常，耗时 {seconds} 秒': 'Connected ({seconds} s)',
+  '测试会合成一句很短的语音，消耗极少的额度。': 'The test synthesizes one very short line, which uses very little quota.',
+  '所有论文和生成内容都以普通文件的形式存放在这个目录里。删除的内容会移到其中的 .trash 文件夹。':
+    'All papers and generated content are stored in this folder as plain files. Deleted items move to its .trash folder.',
+  位置: 'Location',
+  '切换后不会移动原有文件。把旧目录中的 papers 文件夹拷过去，即可继续使用。':
+    "Switching doesn't move existing files. Copy the papers folder from the old location to keep using them.",
+  '切换 Vault': 'Switch vault',
+  'Vault 已切换': 'Vault switched',
+  切换到浅色: 'Switch to light theme',
+  切换到深色: 'Switch to dark theme',
+  '无法连接本地服务：{error}': "Can't reach the local server: {error}",
+  取消任务: 'Cancel task',
+  '请求失败 ({status})': 'Request failed ({status})',
+
+  // Server
+  只接受来自本机页面的请求: 'Only requests from pages on this machine are accepted',
+  接口不存在: 'Endpoint not found',
+  文件不存在: 'File not found',
+  文件太大: 'The file is too large',
+  'Vault 路径必须是绝对路径': 'The vault path must be absolute',
+  '还有任务在运行，请等它们结束后再切换 Vault': 'Tasks are still running. Wait for them to finish before switching vaults.',
+  '无法使用这个目录：{error}': "Can't use this folder: {error}",
+  '尚未配置 API Key': 'No API key is set',
+  '这份 PDF 没有可提取的文字（可能是扫描件），暂时无法生成内容。':
+    "This PDF has no extractable text (it may be a scan), so content can't be generated from it.",
+  '图表提取失败 {id}: {error}': 'Figure extraction failed for {id}: {error}',
+  合集里没有可提取文字的论文: 'No paper in this collection has extractable text',
+  合集至少需要两篇论文: 'A collection needs at least two papers',
+  '合集最多 {count} 篇论文': 'A collection can have at most {count} papers',
+  未命名合集: 'Untitled collection',
+  这个合集还有任务在运行: 'This collection still has tasks running',
+  '博客：{title}': 'Blog: {title}',
+  '脚本：{title}': 'Script: {title}',
+  '合成：{title}': 'Synthesis: {title}',
+  '问答：{title}': 'Ask: {title}',
+  '合集：{title}': 'Collection: {title}',
+  正在提取论文图表: 'Extracting figures',
+  正在写作: 'Writing',
+  '合成被中断，可以重新合成。': 'Synthesis was interrupted. You can run it again.',
+  'Agent 返回的内容无法解析成对话脚本，请重试或更换后端。':
+    "The agent's reply couldn't be parsed as a script. Try again or switch backends.",
+  '脚本共 {total} 字符，超过上限 {limit}': 'The script has {total} characters, over the limit of {limit}',
+  '请先在设置中配置豆包语音 API Key': 'Set a Doubao Speech API key in Settings first',
+  正在连接豆包语音: 'Connecting to Doubao Speech',
+  '第 {round} 轮': 'Turn {round}',
+  已取消: 'Cancelled',
+  '正在合成中，请等待完成后再修改': 'Synthesis is running. Wait for it to finish before making changes.',
+  这期播客正在处理中: 'This episode is already being processed',
+  '正在处理中，请先取消任务': 'Still in progress. Cancel the task first.',
+  问题不能为空: "The question can't be empty",
+  '无法连接 arXiv：{cause}': "Can't connect to arXiv: {cause}",
+  'arXiv API 返回 {status}': 'The arXiv API returned {status}',
+  'arXiv 上找不到 {id}': 'Not found on arXiv: {id}',
+  '下载 PDF 失败：HTTP {status}': 'PDF download failed: HTTP {status}',
+  'PDF 太大': 'The PDF is too large',
+  '这不是有效的 arXiv 链接或编号': "That isn't a valid arXiv link or ID",
+  '无法读取配置文件 {file}：{error}': "Can't read the config file {file}: {error}",
+  '未知的 Agent 后端：{backend}': 'Unknown agent backend: {backend}',
+  '{agent} 返回错误': '{agent} returned an error',
+  '找不到命令 {command}，请先安装或在设置中更换后端。': "Command not found: {command}. Install it or choose another backend in Settings.",
+  '{agent} 退出码 {code}：{detail}': '{agent} exited with code {code}: {detail}',
+  无错误输出: 'no error output',
+  '{agent} 没有返回内容。{detail}': '{agent} returned nothing. {detail}',
+  '无效的 ID：{id}': 'Invalid ID: {id}',
+  '这不是一个有效的 PDF 文件': "This isn't a valid PDF file",
+  '无法解析 PDF：{error}': "Can't parse the PDF: {error}",
+  '论文不存在：{id}': 'Paper not found: {id}',
+  '合集不存在：{id}': 'Collection not found: {id}',
+  '博客不存在：{id}': 'Blog post not found: {id}',
+  '播客不存在：{id}': 'Episode not found: {id}',
+  请求参数错误: 'Invalid request parameters',
+  严格风控下文本审核未通过: 'The text failed strict content review',
+  '并发超限，请稍后重试': 'Too many concurrent requests. Try again later.',
+  内容安全审核拦截或文本超长: 'Blocked by content review, or the text is too long',
+  服务端错误: 'Server error',
+  服务端长时间无响应: 'The server stopped responding',
+  '鉴权失败：请检查 API Key 和服务开通状态。': 'Authentication failed. Check your API key and that the service is enabled.',
+  '建连失败。': 'Connection failed.',
+  '无法解析服务端帧：{error}': "Can't parse a server frame: {error}",
+  轮次合成失败: 'A turn failed to synthesize',
+  '连接错误：{error}': 'Connection error: {error}',
+  '连接在合成完成前断开 ({code})': 'The connection closed before synthesis finished ({code})',
+
+  // Command line
+  '请在浏览器中打开 {url}': 'Open {url} in your browser',
+  '请提供至少一个 PDF 路径或 arXiv 链接': 'Provide at least one PDF path or arXiv link',
+  '找不到文件 {file}，它也不是有效的 arXiv 链接或编号': "File not found: {file}, and it isn't a valid arXiv link or ID",
+  已存在: 'Already exists',
+  已导入: 'Imported',
+  '未知命令：{command}': 'Unknown command: {command}',
+  '无效的端口：{port}': 'Invalid port: {port}',
+  '\n  Paper2Podcast 已启动\n\n  地址   {url}\n  Vault  {vault}\n\n  按 Ctrl+C 退出\n':
+    '\n  Paper2Podcast is running\n\n  URL    {url}\n  Vault  {vault}\n\n  Press Ctrl+C to quit\n',
+  '错误：{error}': 'Error: {error}',
+} as const;
+
+export type Locale = 'zh' | 'en';
+export type MessageKey = keyof typeof en;
+
+let current: Locale = 'en';
+
+export const getLocale = (): Locale => current;
+
+export function setLocale(locale: Locale): void {
+  current = locale;
+}
+
+function fill(text: string, params?: Record<string, string | number>): string {
+  if (!params) return text;
+  return text.replace(/\{(\w+)\}/g, (match, name) => (name in params ? String(params[name]) : match));
+}
+
+/** Translates a known interface string. */
+export function t(key: MessageKey, params?: Record<string, string | number>): string {
+  return fill(current === 'zh' ? key : en[key], params);
+}
+
+/** Translates text held as data, such as a preset's label. Unknown text, like a language's own name, is returned as is. */
+export function tx(text: string): string {
+  return current === 'zh' ? text : ((en as Record<string, string>)[text] ?? text);
+}
+
+/** Every key with its English text, for checking the dictionary. */
+export const dictionary: Readonly<Record<string, string>> = en;
