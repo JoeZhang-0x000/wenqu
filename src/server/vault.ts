@@ -17,6 +17,8 @@ import {
   type Blog,
   type BlogMeta,
   type ChatMessage,
+  type ChatSession,
+  type ChatSessionMeta,
   type Collection,
   type CollectionSummary,
   type OutputEntry,
@@ -66,7 +68,8 @@ export function newOutputId(): string {
  * The vault is plain files, so it stays useful without this app:
  *
  *   <vault>/papers/<paper-id>/
- *     paper.pdf  meta.json  text.json  thumb.jpg  chat.json
+ *     paper.pdf  meta.json  text.json  thumb.jpg
+ *     chats/<id>.json                   (one file per conversation)
  *     figures/fig-<n>.png, figures.json
  *     blogs/<id>.md                     (front matter + Markdown)
  *     podcasts/<id>/podcast.json, audio.mp3
@@ -384,21 +387,82 @@ export class Vault {
 
   // Chat --------------------------------------------------------------------
 
-  private chatPath(paperId: string) {
-    return join(this.paperDir(paperId), 'chat.json');
+  private chatsDir(paperId: string) {
+    return join(this.paperDir(paperId), 'chats');
   }
 
-  getChat(paperId: string): ChatMessage[] {
-    const file = this.chatPath(paperId);
-    return existsSync(file) ? readJson<ChatMessage[]>(file) : [];
+  private chatPath(paperId: string, sessionId: string) {
+    return join(this.chatsDir(paperId), `${assertId(sessionId)}.json`);
   }
 
-  appendChat(paperId: string, message: ChatMessage): void {
-    writeJson(this.chatPath(paperId), [...this.getChat(paperId), message]);
+  /** Earlier versions kept one conversation per paper in `chat.json`. It becomes a session. */
+  private migrateLegacyChat(paperId: string): void {
+    const legacy = join(this.paperDir(paperId), 'chat.json');
+    if (!existsSync(legacy)) return;
+    const messages = readJson<ChatMessage[]>(legacy);
+    if (messages.length) {
+      const session = this.createChat(paperId, messages[0].content);
+      this.writeChat(paperId, {
+        ...session,
+        messages,
+        messageCount: messages.length,
+        createdAt: messages[0].at,
+        updatedAt: messages[messages.length - 1].at,
+      });
+    }
+    rmSync(legacy);
   }
 
-  clearChat(paperId: string): void {
-    rmSync(this.chatPath(paperId), { force: true });
+  private writeChat(paperId: string, session: ChatSession): void {
+    mkdirSync(this.chatsDir(paperId), { recursive: true });
+    writeJson(this.chatPath(paperId, session.id), session);
+  }
+
+  /** Newest activity first. */
+  listChats(paperId: string): ChatSessionMeta[] {
+    this.getPaper(paperId);
+    this.migrateLegacyChat(paperId);
+    const dir = this.chatsDir(paperId);
+    if (!existsSync(dir)) return [];
+    return readdirSync(dir)
+      .filter((f) => f.endsWith('.json') && ID_PATTERN.test(f.slice(0, -5)))
+      .map((f) => {
+        const { messages: _messages, ...meta } = readJson<ChatSession>(join(dir, f));
+        return meta;
+      })
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  createChat(paperId: string, firstQuestion: string): ChatSession {
+    const now = new Date().toISOString();
+    const title = firstQuestion.trim().replace(/\s+/g, ' ');
+    const session: ChatSession = {
+      id: newOutputId(),
+      title: title.length > 60 ? `${title.slice(0, 60)}…` : title,
+      messageCount: 0,
+      createdAt: now,
+      updatedAt: now,
+      messages: [],
+    };
+    this.writeChat(paperId, session);
+    return session;
+  }
+
+  getChat(paperId: string, sessionId: string): ChatSession {
+    const file = this.chatPath(paperId, sessionId);
+    if (!existsSync(file)) throw new NotFound(t('会话不存在：{id}', { id: sessionId }));
+    return readJson<ChatSession>(file);
+  }
+
+  appendChat(paperId: string, sessionId: string, message: ChatMessage): void {
+    const session = this.getChat(paperId, sessionId);
+    const messages = [...session.messages, message];
+    this.writeChat(paperId, { ...session, messages, messageCount: messages.length, updatedAt: message.at });
+  }
+
+  trashChat(paperId: string, sessionId: string): void {
+    this.getChat(paperId, sessionId);
+    this.moveToTrash(this.chatPath(paperId, sessionId), `${paperId}-chat-${sessionId}.json`);
   }
 
   // Across the vault --------------------------------------------------------

@@ -660,28 +660,30 @@ export function createApp({ config, devOrigin }: AppOptions) {
 
   // Chat --------------------------------------------------------------------
 
-  api.get('/papers/:id/chat', (req, res) => res.json(vault.getChat(req.params.id)));
-  api.delete('/papers/:id/chat', (req, res) => {
-    vault.clearChat(req.params.id);
-    res.json({ ok: true });
-  });
-  api.post('/papers/:id/chat', json, (req, res) => {
-    const paperId = req.params.id;
-    const { message, selection, page } = req.body as { message: string; selection?: string; page?: number };
-    if (!message?.trim()) throw new BadRequest(t('问题不能为空'));
+  const askInSession = (
+    paperId: string,
+    sessionId: string,
+    history: ChatMessage[],
+    body: { message: string; selection?: string; page?: number; backend?: AgentBackend; model?: string },
+  ) => {
     const ctx = paperContext(paperId);
-    const agent = agentChoice(req.body);
-    const history = vault.getChat(paperId);
-    const user: ChatMessage = { role: 'user', content: message.trim(), selection, page, at: new Date().toISOString() };
-    vault.appendChat(paperId, user);
+    const agent = agentChoice(body);
+    const user: ChatMessage = {
+      role: 'user',
+      content: body.message.trim(),
+      selection: body.selection,
+      page: body.page,
+      at: new Date().toISOString(),
+    };
+    vault.appendChat(paperId, sessionId, user);
     const finish = (content: string, error?: boolean) =>
-      vault.appendChat(paperId, { role: 'assistant', content, error, agent: agentLabel(agent), at: new Date().toISOString() });
+      vault.appendChat(paperId, sessionId, { role: 'assistant', content, error, agent: agentLabel(agent), at: new Date().toISOString() });
     const job = jobs.start(
-      { kind: 'chat', paperId, label: t('问答：{title}', { title: message.trim().slice(0, 40) }) },
+      { kind: 'chat', paperId, targetId: sessionId, label: t('问答：{title}', { title: user.content.slice(0, 40) }) },
       async ({ signal, delta }) => {
         const reply = await runAgent({
           ...agent,
-          ...chatPrompt({ ...ctx, history, question: user.content, selection, page }),
+          ...chatPrompt({ ...ctx, history, question: user.content, selection: body.selection, page: body.page }),
           onDelta: delta,
           signal,
         });
@@ -689,7 +691,33 @@ export function createApp({ config, devOrigin }: AppOptions) {
       },
       (error, canceled) => finish(canceled ? t('已取消') : error, true),
     );
-    res.json({ job, message: user });
+    jobs.send({ type: 'library' });
+    return { job, message: user };
+  };
+
+  api.get('/papers/:id/chats', (req, res) => res.json(vault.listChats(req.params.id)));
+  api.get('/papers/:id/chats/:sessionId', (req, res) => res.json(vault.getChat(req.params.id, req.params.sessionId)));
+
+  /** A session is created by its first question, so an empty one never lingers in the history. */
+  api.post('/papers/:id/chats', json, (req, res) => {
+    if (!req.body?.message?.trim()) throw new BadRequest(t('问题不能为空'));
+    paperContext(req.params.id);
+    const session = vault.createChat(req.params.id, req.body.message);
+    res.json({ sessionId: session.id, ...askInSession(req.params.id, session.id, [], req.body) });
+  });
+
+  api.post('/papers/:id/chats/:sessionId/messages', json, (req, res) => {
+    if (!req.body?.message?.trim()) throw new BadRequest(t('问题不能为空'));
+    const session = vault.getChat(req.params.id, req.params.sessionId);
+    if (jobs.isActive(session.id)) throw new BadRequest(t('这个会话正在回答，请等它结束'));
+    res.json(askInSession(req.params.id, session.id, session.messages, req.body));
+  });
+
+  api.delete('/papers/:id/chats/:sessionId', (req, res) => {
+    if (jobs.isActive(req.params.sessionId)) throw new BadRequest(t('这个会话正在回答，请等它结束'));
+    vault.trashChat(req.params.id, req.params.sessionId);
+    jobs.send({ type: 'library' });
+    res.json({ ok: true });
   });
 
   // Jobs and events ---------------------------------------------------------

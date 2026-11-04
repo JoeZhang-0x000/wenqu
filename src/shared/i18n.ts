@@ -5,6 +5,16 @@
  */
 const en = {
   // Chat panel
+  历史会话: 'Chat history',
+  新建会话: 'New chat',
+  新会话: 'New chat',
+  返回当前会话: 'Back to chat',
+  还没有会话记录: 'No chats yet',
+  '{count} 条消息': 'Messages: {count}',
+  删除这个会话: 'Delete this chat',
+  '把这个会话移到 Vault 回收站？': "Move this chat to the vault's trash?",
+  '会话不存在：{id}': 'Chat not found: {id}',
+  '这个会话正在回答，请等它结束': 'This chat is still answering. Wait for it to finish.',
   悬浮: 'Float',
   停靠到侧边: 'Dock to side',
   隐藏问答: 'Hide chat',
@@ -109,9 +119,6 @@ const en = {
   针对这段文字提问: 'Ask about this passage',
   '问问 {agent}': 'Ask {agent}',
   移除引用: 'Remove quote',
-  清空对话: 'Clear conversation',
-  '清空这篇论文的对话记录？': 'Clear the conversation for this paper?',
-  清空: 'Clear',
   停止: 'Stop',
   发送: 'Send',
   '{agent} 正在阅读论文': '{agent} is reading the paper',

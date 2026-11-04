@@ -282,6 +282,18 @@ export interface ChatMessage {
   at: string;
 }
 
+export interface ChatSessionMeta {
+  id: string;
+  title: string;
+  messageCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChatSession extends ChatSessionMeta {
+  messages: ChatMessage[];
+}
+
 export type JobKind = 'blog' | 'script' | 'synth' | 'chat';
 export type JobStatus = 'running' | 'done' | 'failed' | 'canceled';
 

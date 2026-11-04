@@ -1,8 +1,8 @@
-import { ArrowUp, Square, Trash2, X } from 'lucide-react';
-import { t } from '../../src/shared/i18n';
+import { ArrowUp, History, MessageSquare, Plus, Square, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ChatMessage, Job } from '../../src/shared/types';
-import { api, confirmAction, fail, jobsStore, useFetch, useStore } from './lib';
+import { t } from '../../src/shared/i18n';
+import type { ChatMessage, ChatSession, ChatSessionMeta, Job } from '../../src/shared/types';
+import { api, bumpLibrary, confirmAction, fail, formatDate, jobsStore, useFetch, useStore } from './lib';
 import { Markdown } from './Markdown';
 import type { SelectionAsk } from './PdfViewer';
 
@@ -19,33 +19,48 @@ export function ChatPanel({
   onCite(page: number): void;
   agentName: string;
 }) {
-  const { data, setData } = useFetch<ChatMessage[]>(`/papers/${paperId}/chat`);
+  const { data: sessions } = useFetch<ChatSessionMeta[]>(`/papers/${paperId}/chats`);
+  /** null is a new chat that doesn't exist until its first question. */
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const opened = useRef(false);
+  const { data: session, setData: setSession } = useFetch<ChatSession>(sessionId ? `/papers/${paperId}/chats/${sessionId}` : null);
   const jobs = useStore(jobsStore);
-  const running: Job | undefined = useMemo(
-    () => Object.values(jobs).find((j) => j.kind === 'chat' && j.paperId === paperId && j.status === 'running'),
-    [jobs, paperId],
-  );
+  const runningJobs = useMemo(() => Object.values(jobs).filter((j) => j.kind === 'chat' && j.paperId === paperId && j.status === 'running'), [jobs, paperId]);
+  const running: Job | undefined = runningJobs.find((j) => j.targetId === sessionId);
   const [input, setInput] = useState('');
   const [quote, setQuote] = useState<{ text: string; page?: number } | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const handledAsk = useRef<number>(0);
-  const messages = data ?? [];
+  const messages = sessionId && session?.id === sessionId ? session.messages : [];
+
+  // Picks up where you left off, once per paper.
+  useEffect(() => {
+    if (!sessions || opened.current) return;
+    opened.current = true;
+    if (sessions[0]) setSessionId(sessions[0].id);
+  }, [sessions]);
 
   useEffect(() => {
     const log = logRef.current;
     if (log) log.scrollTop = log.scrollHeight;
-  }, [messages.length, running?.text]);
+  }, [messages.length, running?.text, showHistory]);
 
   const send = async (text: string, selection?: { text: string; page?: number } | null) => {
     if (!text.trim() || running) return;
     setInput('');
     setQuote(null);
+    setShowHistory(false);
+    const body = { message: text, selection: selection?.text, page: selection?.page };
     try {
-      const res = await api<{ message: ChatMessage }>(`/papers/${paperId}/chat`, {
-        body: { message: text, selection: selection?.text, page: selection?.page },
-      });
-      setData((current) => [...(current ?? []), res.message]);
+      if (sessionId) {
+        const res = await api<{ message: ChatMessage }>(`/papers/${paperId}/chats/${sessionId}/messages`, { body });
+        setSession((current) => (current ? { ...current, messages: [...current.messages, res.message] } : current));
+      } else {
+        const res = await api<{ sessionId: string }>(`/papers/${paperId}/chats`, { body });
+        setSessionId(res.sessionId);
+      }
     } catch (err) {
       setInput(text);
       fail(err);
@@ -56,7 +71,8 @@ export function ChatPanel({
     if (!ask || handledAsk.current === ask.nonce) return;
     handledAsk.current = ask.nonce;
     const selection = { text: ask.selection, page: ask.page };
-    if (ask.prompt) {
+    setShowHistory(false);
+    if (ask.prompt && !running) {
       void send(ask.prompt, selection);
     } else {
       setQuote(selection);
@@ -64,43 +80,97 @@ export function ChatPanel({
     }
   }, [ask]);
 
+  const startNew = () => {
+    setSessionId(null);
+    setShowHistory(false);
+    setQuote(null);
+    inputRef.current?.focus();
+  };
+
+  const remove = async (id: string) => {
+    if (!(await confirmAction(t('把这个会话移到 Vault 回收站？'), t('删除')))) return;
+    try {
+      await api(`/papers/${paperId}/chats/${id}`, { method: 'DELETE' });
+      if (id === sessionId) setSessionId(null);
+      bumpLibrary();
+    } catch (err) {
+      fail(err);
+    }
+  };
+
+  const title = sessions?.find((s) => s.id === sessionId)?.title ?? t('新会话');
+
   return (
     <div className="chat">
-      <div className="chat-log" ref={logRef}>
-        {!messages.length && !running && (
-          <div className="chat-empty">
-            <p className="serif">{t('读到哪里，问到哪里。')}</p>
-            <p className="muted">{t('回答基于全文并标注页码，点击页码可跳转。也可以在左侧选中一段文字直接提问。')}</p>
-            <div className="chips">
-              {starters().map((s) => (
-                <button className="chip" key={s} onClick={() => send(s)}>{s}</button>
-              ))}
-            </div>
-          </div>
-        )}
-        {messages.map((m, i) =>
-          m.role === 'user' ? (
-            <div className="msg user" key={i}>
-              {m.selection && (
-                <blockquote className="quote" onClick={() => m.page && onCite(m.page)}>
-                  {m.page && <span className="mono">p.{m.page}</span>} {m.selection}
-                </blockquote>
-              )}
-              <div>{m.content}</div>
-            </div>
-          ) : (
-            <div className={`msg ai ${m.error ? 'err' : ''}`} key={i}>
-              {m.error ? <p>{m.content}</p> : <Markdown source={m.content} onCite={onCite} />}
-              {m.agent && <div className="msg-agent mono">{m.agent}</div>}
-            </div>
-          ),
-        )}
-        {running && (
-          <div className="msg ai">
-            {running.text ? <Markdown source={running.text} onCite={onCite} /> : <Thinking label={agentName} />}
-          </div>
-        )}
+      <div className="chat-bar">
+        <button className={`icon ${showHistory ? 'on' : ''}`} title={showHistory ? t('返回当前会话') : t('历史会话')} onClick={() => setShowHistory(!showHistory)}>
+          <History size={15} />
+        </button>
+        <span className="chat-title" title={title}>{showHistory ? t('历史会话') : title}</span>
+        <button className="icon" title={t('新建会话')} onClick={startNew}><Plus size={15} /></button>
       </div>
+
+      {showHistory ? (
+        <div className="chat-history">
+          {sessions?.length === 0 && <p className="muted empty">{t('还没有会话记录')}</p>}
+          {sessions?.map((s) => (
+            <div className={`history-row ${s.id === sessionId ? 'on' : ''}`} key={s.id}>
+              <button
+                className="history-open"
+                onClick={() => {
+                  setSessionId(s.id);
+                  setShowHistory(false);
+                }}
+              >
+                <span className="history-title">{s.title}</span>
+                <span className="history-meta">
+                  <MessageSquare size={11} />
+                  {t('{count} 条消息', { count: s.messageCount })} · {formatDate(s.updatedAt)}
+                  {runningJobs.some((j) => j.targetId === s.id) && <span className="dot live" />}
+                </span>
+              </button>
+              <button className="icon danger" title={t('删除这个会话')} onClick={() => remove(s.id)}><Trash2 size={14} /></button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="chat-log" ref={logRef}>
+          {!sessionId && (
+            <div className="chat-empty">
+              <p className="serif">{t('读到哪里，问到哪里。')}</p>
+              <p className="muted">{t('回答基于全文并标注页码，点击页码可跳转。也可以在左侧选中一段文字直接提问。')}</p>
+              <div className="chips">
+                {starters().map((s) => (
+                  <button className="chip" key={s} onClick={() => send(s)}>{s}</button>
+                ))}
+              </div>
+            </div>
+          )}
+          {messages.map((m, i) =>
+            m.role === 'user' ? (
+              <div className="msg user" key={i}>
+                {m.selection && (
+                  <blockquote className="quote" onClick={() => m.page && onCite(m.page)}>
+                    {m.page && <span className="mono">p.{m.page}</span>} {m.selection}
+                  </blockquote>
+                )}
+                <div>{m.content}</div>
+              </div>
+            ) : (
+              <div className={`msg ai ${m.error ? 'err' : ''}`} key={i}>
+                {m.error ? <p>{m.content}</p> : <Markdown source={m.content} onCite={onCite} />}
+                {m.agent && <div className="msg-agent mono">{m.agent}</div>}
+              </div>
+            ),
+          )}
+          {running && (
+            <div className="msg ai">
+              {running.text ? <Markdown source={running.text} onCite={onCite} /> : <Thinking label={agentName} />}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="chat-input">
         {quote && (
           <div className="quote-chip">
@@ -123,20 +193,6 @@ export function ChatPanel({
             }}
           />
           <div className="chat-actions">
-            {messages.length > 0 && (
-              <button
-                className="icon"
-                title={t('清空对话')}
-                onClick={async () => {
-                  if (await confirmAction(t('清空这篇论文的对话记录？'), t('清空'))) {
-                    await api(`/papers/${paperId}/chat`, { method: 'DELETE' }).catch(fail);
-                    setData([]);
-                  }
-                }}
-              >
-                <Trash2 size={14} />
-              </button>
-            )}
             <div className="spacer" />
             {running ? (
               <button className="send" title={t('停止')} onClick={() => api(`/jobs/${running.id}/cancel`, { method: 'POST' }).catch(fail)}>

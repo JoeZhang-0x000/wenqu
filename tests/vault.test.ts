@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -122,6 +122,51 @@ describe('Vault', () => {
   it('never lets a paper id look like a collection id', async () => {
     const { meta } = await vault.importPdf(fixture('cpn.pdf'), 'collection--x.pdf', { title: 'Collection -- x' });
     expect(meta.id.startsWith('collection--')).toBe(false);
+  });
+
+  describe('chat sessions', () => {
+    const question = (content: string) => ({ role: 'user' as const, content, at: new Date().toISOString() });
+
+    it('keeps separate conversations per paper, newest activity first', async () => {
+      const a = (await vault.importPdf(fixture('cpn.pdf'), 'a.pdf')).meta.id;
+      const b = (await vault.importPdf(fixture('cpn-zh.pdf'), 'b.pdf')).meta.id;
+      const first = vault.createChat(a, 'First question');
+      const second = vault.createChat(a, 'Second question');
+      vault.appendChat(a, second.id, question('Second question'));
+      vault.appendChat(a, first.id, { ...question('Later'), at: '2999-01-01T00:00:00.000Z' });
+
+      expect(vault.listChats(a).map((s) => s.id)).toEqual([first.id, second.id]);
+      expect(vault.listChats(a)[0]).toMatchObject({ title: 'First question', messageCount: 1 });
+      expect(vault.listChats(b)).toEqual([]);
+      expect(vault.getChat(a, first.id).messages[0].content).toBe('Later');
+    });
+
+    it('shortens long titles and collapses whitespace', async () => {
+      const a = (await vault.importPdf(fixture('cpn.pdf'), 'a.pdf')).meta.id;
+      expect(vault.createChat(a, '  one\n two  ').title).toBe('one two');
+      expect(vault.createChat(a, 'x'.repeat(100)).title).toBe(`${'x'.repeat(60)}…`);
+    });
+
+    it('turns the old single conversation into a session, once', async () => {
+      const a = (await vault.importPdf(fixture('cpn.pdf'), 'a.pdf')).meta.id;
+      const legacy = [question('Old question'), { role: 'assistant' as const, content: 'Old answer', at: '2020-01-01T00:00:00.000Z' }];
+      writeFileSync(join(vault.paperDir(a), 'chat.json'), JSON.stringify(legacy));
+
+      const [session] = vault.listChats(a);
+      expect(session).toMatchObject({ title: 'Old question', messageCount: 2, updatedAt: '2020-01-01T00:00:00.000Z' });
+      expect(vault.getChat(a, session.id).messages[1].content).toBe('Old answer');
+      expect(existsSync(join(vault.paperDir(a), 'chat.json'))).toBe(false);
+      expect(vault.listChats(a)).toHaveLength(1);
+    });
+
+    it('moves a deleted chat to the trash, and refuses unsafe ids', async () => {
+      const a = (await vault.importPdf(fixture('cpn.pdf'), 'a.pdf')).meta.id;
+      const session = vault.createChat(a, 'Q');
+      vault.trashChat(a, session.id);
+      expect(vault.listChats(a)).toEqual([]);
+      expect(() => vault.getChat(a, session.id)).toThrow(NotFound);
+      expect(() => vault.getChat(a, '../meta')).toThrow(NotFound);
+    });
   });
 
   it('moves deleted content to the trash instead of removing it', async () => {
