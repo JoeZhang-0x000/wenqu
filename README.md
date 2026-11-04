@@ -10,15 +10,15 @@ English | [简体中文](README.zh-CN.md)
 
 There are more papers than time to read them, and a PDF is no use on your commute. Paper2Podcast is a paper workbench that runs on your own computer. Drop in a PDF or an arXiv link, ask AI questions as you read, then generate a two-host podcast and an illustrated blog post. Everything is stored as plain files in your vault. There is no account to create, and the tool has no cloud service of its own.
 
-![An episode playing: the paper on the left, a synced transcript on the right, and a timeline colored by host at the bottom](docs/images/podcast-player.png)
+![An episode playing in the main area with a synced transcript, chat in the sidebar, and a timeline colored by host at the bottom](docs/images/podcast-player.png)
 
 ## Highlights
 
 - 🎙️ **Papers become podcasts.** An agent writes a script in the language, style and length you choose. You can edit it turn by turn, then send it to Doubao for speech synthesis. The transcript follows along during playback, and clicking any line jumps to it.
-- 💬 **Ask as you read.** Select a passage in the PDF to ask about it, explain it or translate it. Answers draw on the full text and cite page numbers, and clicking a citation takes you to that page.
+- 💬 **Ask as you read.** Select a passage in the PDF to ask about it, explain it or translate it. Answers draw on the full text and cite page numbers, and clicking a citation takes you to that page. Each paper keeps its own chat history.
 - 🖼️ **Blog posts with the paper's figures.** Captioned figures are cropped automatically, and the agent picks which ones to use. Exported Markdown embeds its images, so one file is all you need to publish.
 - 📚 **Multi-paper collections.** Pick a few papers and make a weekly digest or a mini literature review. Citations show which paper and page each claim came from.
-- 🔌 **Bring your own agent.** Switch between Claude Code, Codex and pi, using each one's existing login.
+- 🔌 **Bring your own agent.** Start a chat with Claude Code, Codex or pi, whichever is on your machine, using its existing login. Pick from the models it reports and set how hard it thinks.
 - 🌐 **English and Chinese.** The interface follows your browser's language, or you can set it in Settings. Generated content can be in English, Chinese or Japanese.
 - 🔒 **Local-first.** The server listens only on your machine, and agents run with restricted permissions to reduce the risk from malicious instructions hidden in a paper. See [Security](#security).
 
@@ -50,11 +50,29 @@ To use the `paper2podcast` command from any directory, also run `npm link`.
 
 ## Features
 
-### Reading and questions
+### Workspace
+
+The main area switches between the paper, its blog posts and its podcast episodes. The PDF keeps its place when you switch away. Chat stays alongside all of them, and you can dock it to the side, float it as a panel you can drag and resize, or hide it behind a button.
+
+PDFs are rendered by pdf.js, with search, zoom and a night mode. Math is displayed with KaTeX.
+
+### Chat
 
 ![After selecting text in the PDF, a menu offers to ask, explain or translate, next to an answer with page citations](docs/images/ask-ai.png)
 
-PDFs are rendered by pdf.js, with search, zoom and a night mode. Math is displayed with KaTeX.
+Conversations are kept per paper. Open the history to return to an earlier one or delete it. An existing single conversation from an earlier version becomes a session automatically.
+
+![A floating chat panel over the paper, starting a new chat with a choice of harness, model and thinking level](docs/images/chat-float.png)
+
+| | When you can change it | Where the options come from |
+|---|---|---|
+| Harness | Only when creating a chat | The CLIs found on your machine |
+| Model | Any time | `codex debug models`, `pi --list-models`, and the aliases in `claude --help` |
+| Thinking level | Any time | The CLI's help or model list, per model where it reports them |
+
+Claude Code has no command for listing models, so only the aliases named in its help appear, along with anything in your settings' `model` and `availableModels`.
+
+The agent settings choose what blog posts and podcast scripts use, and the defaults for new chats.
 
 ### Podcasts
 
@@ -111,7 +129,7 @@ The vault lives in `~/Paper2Podcast` by default. Its contents remain usable with
     paper.pdf
     meta.json         Title, authors and so on; safe to edit by hand
     text.json         Extracted text, page by page
-    chat.json         Question history
+    chats/<id>.json   One file per conversation
     figures/          Extracted figures
     blogs/<id>.md     Front matter + Markdown, with figures as relative paths
     podcasts/<id>/    podcast.json (script and timeline), audio.mp3
@@ -161,7 +179,7 @@ If you find a security issue, please contact the maintainers privately instead o
   - Only captions in the style of `Figure N:` are detected, and tables aren't extracted. You can remove a bad crop in the blog form.
   - Agents can't see the images, so they choose and describe figures from their captions alone.
   - Extraction relies on the optional `@napi-rs/canvas` package. Where it isn't supported, blog posts have no figures.
-- **Collections:** agent scripts only, with no question answering.
+- **Collections:** agent scripts only, with no chat.
 
 AI-generated content can be wrong, so check it against the source before publishing. Before reusing a paper's text or figures, also confirm what its license allows.
 
