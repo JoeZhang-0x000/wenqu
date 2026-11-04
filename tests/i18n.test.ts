@@ -16,6 +16,8 @@ const ALLOWED: Record<string, RegExp[]> = {
   // Help text exists in both languages.
   'cli.ts': [/^/],
   'Settings.tsx': [/label: '中文'/],
+  // The verse is the same in every language.
+  'Library.tsx': [/const VERSE =/],
 };
 
 describe('translations', () => {

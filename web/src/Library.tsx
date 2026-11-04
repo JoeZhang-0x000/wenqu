@@ -1,5 +1,5 @@
 import { AudioLines, Check, FileText, Layers, Link2, Loader2, Plus, Search, Upload } from 'lucide-react';
-import { t } from '../../src/shared/i18n';
+import { getLocale, t } from '../../src/shared/i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PaperSummary } from '../../src/shared/types';
 import { api, bumpLibrary, fail, paperHref, toast, useFetch } from './lib';
@@ -20,6 +20,18 @@ export async function importFiles(files: File[]) {
     }
   }
   bumpLibrary();
+}
+
+const VERSE = '问渠哪得清如许？为有源头活水来。';
+
+function Motto() {
+  return (
+    <figure className="motto">
+      <blockquote className="serif" lang="zh-CN">{VERSE}</blockquote>
+      {getLocale() !== 'zh' && <p className="motto-gloss">How can the water run so clear? Because fresh water keeps flowing from its source.</p>}
+      <figcaption>{t('朱熹《观书有感》')}</figcaption>
+    </figure>
+  );
 }
 
 /** Accepts an arXiv link or id. */
@@ -105,10 +117,11 @@ export function Library() {
     return (
       <div className="page">
         {picker}
+        <Motto />
         <button className="empty-drop" onClick={() => fileRef.current?.click()}>
           <Upload size={26} strokeWidth={1.5} />
           <span className="serif">{t('把第一篇论文拖进来')}</span>
-          <span className="muted">{t('或者点击选择 PDF。也可以在终端运行')} <code>paper2podcast add paper.pdf</code></span>
+          <span className="muted">{t('或者点击选择 PDF。也可以在终端运行')} <code>wenqu add paper.pdf</code></span>
         </button>
         <div className="empty-arxiv"><ArxivImport /></div>
       </div>
@@ -118,6 +131,7 @@ export function Library() {
   return (
     <div className="page">
       {picker}
+      <Motto />
       <header className="page-head">
         <h1 className="serif">{t('书架')}</h1>
         <span className="muted mono">{papers?.length ?? ''}</span>

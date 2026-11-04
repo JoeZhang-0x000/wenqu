@@ -1,18 +1,34 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { AGENT_BACKENDS, SPEAKER_PAIRS, type AgentBackend, type PublicSettings, type Settings, type SettingsPatch } from '../shared/types.js';
 import { getLocale, t } from '../shared/i18n.js';
 import { DOUBAO_RESOURCE_ID } from './doubao.js';
 
-const configDir = () => process.env.P2P_CONFIG_DIR || join(homedir(), '.config', 'paper2podcast');
+const configDir = () => process.env.WENQU_CONFIG_DIR || join(homedir(), '.config', 'wenqu');
 const configFile = () => join(configDir(), 'config.json');
+
+/** Settings from when the project was called Paper2Podcast are carried over once. The old file is left in place. */
+function adoptLegacyConfig(): void {
+  const legacy = join(homedir(), '.config', 'paper2podcast', 'config.json');
+  if (process.env.WENQU_CONFIG_DIR || existsSync(configFile()) || !existsSync(legacy)) return;
+  mkdirSync(configDir(), { recursive: true, mode: 0o700 });
+  copyFileSync(legacy, configFile());
+  chmodSync(configFile(), 0o600);
+}
+
+/** A vault in the earlier default location keeps being used, so nothing appears to go missing. */
+function defaultVaultPath(): string {
+  const current = join(homedir(), 'Wenqu');
+  const legacy = join(homedir(), 'Paper2Podcast');
+  return existsSync(legacy) && !existsSync(current) ? legacy : current;
+}
 
 export const expandHome = (p: string) => (p === '~' || p.startsWith('~/') ? join(homedir(), p.slice(1)) : p);
 
 export function defaultSettings(): Settings {
   return {
-    vaultPath: join(homedir(), 'Paper2Podcast'),
+    vaultPath: defaultVaultPath(),
     uiLanguage: 'auto',
     agent: { backend: 'claude', models: { pi: '', claude: '', codex: '' }, thinking: { pi: '', claude: '', codex: '' } },
     podcast: {
@@ -54,6 +70,7 @@ export class Config {
   private vaultOverride?: string;
 
   constructor(vaultOverride?: string) {
+    adoptLegacyConfig();
     let saved: SettingsPatch = {};
     if (existsSync(configFile())) {
       try {

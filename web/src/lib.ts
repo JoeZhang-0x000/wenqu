@@ -6,7 +6,7 @@ export async function api<T = any>(path: string, init?: { method?: string; body?
   const res = await fetch(`/api${path}`, {
     method: init?.method ?? (init?.body !== undefined || init?.raw !== undefined ? 'POST' : 'GET'),
     // Tells the server which language to use for errors and task labels.
-    headers: { 'X-P2P-Locale': getLocale(), ...(init?.body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
+    headers: { 'X-Wenqu-Locale': getLocale(), ...(init?.body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
     body: init?.raw ?? (init?.body !== undefined ? JSON.stringify(init.body) : undefined),
   });
   const type = res.headers.get('content-type') ?? '';
@@ -57,6 +57,7 @@ export function applySettings(settings: PublicSettings) {
   const locale = settings.uiLanguage === 'auto' ? browserLocale() : settings.uiLanguage;
   setLocale(locale);
   document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en';
+  document.title = t('问渠');
   // The locale goes first, so the settings update already renders in the new language.
   localeStore.set(locale);
   settingsStore.set(settings);

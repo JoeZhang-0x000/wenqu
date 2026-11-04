@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { extractFigures, figurePath, inlineFigures, keepKnownFigures } from '../src/server/figures';
 
-const dir = mkdtempSync(join(tmpdir(), 'p2p-figures-'));
+const dir = mkdtempSync(join(tmpdir(), 'wenqu-figures-'));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 describe('extractFigures', () => {

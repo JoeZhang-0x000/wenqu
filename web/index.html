@@ -3,11 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Paper2Podcast</title>
+    <title>Wenqu</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23d6451f'/%3E%3Cg fill='%23fff'%3E%3Crect x='7' y='13' width='3' height='6' rx='1.5'/%3E%3Crect x='12' y='8' width='3' height='16' rx='1.5'/%3E%3Crect x='17' y='11' width='3' height='10' rx='1.5'/%3E%3Crect x='22' y='14' width='3' height='4' rx='1.5'/%3E%3C/g%3E%3C/svg%3E" />
     <script>
       try {
-        const saved = localStorage.getItem('p2p-theme');
+        // Preferences saved under the project's earlier name.
+        for (const key of Object.keys(localStorage)) {
+          if (!key.startsWith('p2p-')) continue;
+          const renamed = `wenqu-${key.slice(4)}`;
+          if (localStorage.getItem(renamed) === null) localStorage.setItem(renamed, localStorage.getItem(key));
+          localStorage.removeItem(key);
+        }
+        const saved = localStorage.getItem('wenqu-theme');
         if (saved) document.documentElement.dataset.theme = saved;
       } catch {}
     </script>

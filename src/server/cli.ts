@@ -10,11 +10,11 @@ import { createApp, listen } from './server.js';
 import { Vault } from './vault.js';
 
 const HELP = {
-  en: `Paper2Podcast: a local paper library that generates blog posts and podcasts
+  en: `Wenqu: a local paper library that generates blog posts and podcasts
 
 Usage
-  paper2podcast [start] [options]     Start the server and open a browser
-  paper2podcast add <file.pdf|arXiv link or ID...>
+  wenqu [start] [options]             Start the server and open a browser
+  wenqu add <file.pdf|arXiv link or ID...>
                                       Import papers into the vault
 
 Options
@@ -24,11 +24,11 @@ Options
   -h, --help       Show help
   -v, --version    Show version
 `,
-  zh: `Paper2Podcast: 本地论文库、博客与播客生成
+  zh: `问渠：本地论文库、博客与播客生成
 
 用法
-  paper2podcast [start] [选项]        启动服务并打开浏览器
-  paper2podcast add <file.pdf|arXiv链接或编号...>
+  wenqu [start] [选项]                启动服务并打开浏览器
+  wenqu add <file.pdf|arXiv链接或编号...>
                                       把论文导入 Vault
 
 选项
@@ -77,7 +77,7 @@ async function main(): Promise<void> {
     return;
   }
   if (values.version) {
-    console.log(process.env.P2P_VERSION ?? 'dev');
+    console.log(process.env.WENQU_VERSION ?? 'dev');
     return;
   }
 
@@ -103,10 +103,10 @@ async function main(): Promise<void> {
   const port = Number(values.port ?? 4317);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(t('无效的端口：{port}', { port: String(values.port) }));
 
-  const { app } = createApp({ config, devOrigin: process.env.P2P_DEV_ORIGIN });
+  const { app } = createApp({ config, devOrigin: process.env.WENQU_DEV_ORIGIN });
   const { port: actual } = await listen(app, port);
   const url = `http://127.0.0.1:${actual}`;
-  console.log(t('\n  Paper2Podcast 已启动\n\n  地址   {url}\n  Vault  {vault}\n\n  按 Ctrl+C 退出\n', { url, vault: config.get().vaultPath }));
+  console.log(t('\n  问渠已启动\n\n  地址   {url}\n  Vault  {vault}\n\n  按 Ctrl+C 退出\n', { url, vault: config.get().vaultPath }));
   if (!values['no-open']) openBrowser(url);
 }
 

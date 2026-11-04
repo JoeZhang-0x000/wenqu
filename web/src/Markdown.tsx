@@ -23,7 +23,7 @@ export function renderMarkdown(source: string, ownerId?: string): string {
   const stashed: string[] = [];
   const hold = (html: string) => {
     stashed.push(html);
-    return `P2PHOLD${stashed.length - 1}X`;
+    return `WENQUHOLD${stashed.length - 1}X`;
   };
   const stash = (tex: string, displayMode: boolean) =>
     hold(katex.renderToString(tex.trim(), { displayMode, throwOnError: false, output: 'htmlAndMathml' }));
@@ -51,7 +51,7 @@ export function renderMarkdown(source: string, ownerId?: string): string {
     )
     .join('');
   const html = (marked.parse(prepared, { async: false, gfm: true, breaks: false }) as string).replace(
-    /P2PHOLD(\d+)X/g,
+    /WENQUHOLD(\d+)X/g,
     (_, i) => stashed[Number(i)],
   );
   // Output comes from an agent that read an untrusted PDF, so it is never trusted as HTML.

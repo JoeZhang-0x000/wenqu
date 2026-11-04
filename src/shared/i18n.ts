@@ -30,6 +30,8 @@ const en = {
   拖动调整大小: 'Drag to resize',
 
   // Library and navigation
+  问渠: 'Wenqu',
+  '朱熹《观书有感》': 'Zhu Xi, “Reflections on Reading”',
   论文: 'Paper',
   书架: 'Library',
   合集: 'Collections',
@@ -397,8 +399,8 @@ const en = {
   已导入: 'Imported',
   '未知命令：{command}': 'Unknown command: {command}',
   '无效的端口：{port}': 'Invalid port: {port}',
-  '\n  Paper2Podcast 已启动\n\n  地址   {url}\n  Vault  {vault}\n\n  按 Ctrl+C 退出\n':
-    '\n  Paper2Podcast is running\n\n  URL    {url}\n  Vault  {vault}\n\n  Press Ctrl+C to quit\n',
+  '\n  问渠已启动\n\n  地址   {url}\n  Vault  {vault}\n\n  按 Ctrl+C 退出\n':
+    '\n  Wenqu is running\n\n  URL    {url}\n  Vault  {vault}\n\n  Press Ctrl+C to quit\n',
   '错误：{error}': 'Error: {error}',
 } as const;
 

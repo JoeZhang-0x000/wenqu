@@ -11,6 +11,6 @@ await build({
   format: 'esm',
   target: 'node20',
   external: [...Object.keys(dependencies), ...Object.keys(optionalDependencies)],
-  define: { 'process.env.P2P_VERSION': JSON.stringify(version) },
+  define: { 'process.env.WENQU_VERSION': JSON.stringify(version) },
 });
 chmodSync('dist/cli.js', 0o755);

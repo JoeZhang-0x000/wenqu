@@ -67,7 +67,7 @@ export function App() {
       <header className="top">
         <a className="brand" href="#/">
           <span className="brand-mark"><i /><i /><i /><i /></span>
-          <span className="serif">Paper2Podcast</span>
+          <span className="serif">{t('问渠')}</span>
         </a>
         <nav className="top-nav">
           <a className={route.page === 'library' ? 'on' : ''} href="#/">{t('书架')}</a>
@@ -163,7 +163,7 @@ function ThemeToggle() {
         const next = dark ? 'light' : 'dark';
         document.documentElement.dataset.theme = next;
         try {
-          localStorage.setItem('p2p-theme', next);
+          localStorage.setItem('wenqu-theme', next);
         } catch {
           /* A convenience only. */
         }

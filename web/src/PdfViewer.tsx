@@ -33,7 +33,7 @@ export const PdfViewer = forwardRef<PdfHandle, Props>(function PdfViewer({ url, 
   const [error, setError] = useState<string>();
   const [night, setNight] = useState(() => {
     try {
-      return localStorage.getItem('p2p-night-pdf') === '1';
+      return localStorage.getItem('wenqu-night-pdf') === '1';
     } catch {
       return false;
     }
@@ -191,7 +191,7 @@ export const PdfViewer = forwardRef<PdfHandle, Props>(function PdfViewer({ url, 
           onClick={() => {
             setNight(!night);
             try {
-              localStorage.setItem('p2p-night-pdf', night ? '0' : '1');
+              localStorage.setItem('wenqu-night-pdf', night ? '0' : '1');
             } catch {
               /* A convenience only. */
             }

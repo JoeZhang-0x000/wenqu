@@ -1,5 +1,5 @@
 {
-  "name": "paper2podcast",
+  "name": "wenqu",
   "version": "0.1.0",
   "description": "Local-first paper vault: read PDFs with an AI sidebar, generate blogs and podcasts.",
   "keywords": [
@@ -18,9 +18,16 @@
   ],
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JoeZhang-0x000/wenqu.git"
+  },
+  "homepage": "https://github.com/JoeZhang-0x000/wenqu#readme",
+  "bugs": {
+    "url": "https://github.com/JoeZhang-0x000/wenqu/issues"
+  },
   "bin": {
-    "paper2podcast": "dist/cli.js",
-    "p2p": "dist/cli.js"
+    "wenqu": "dist/cli.js"
   },
   "files": [
     "dist"
@@ -29,7 +36,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev": "concurrently -k -n api,web -c blue,magenta \"P2P_DEV_ORIGIN=http://localhost:5173 tsx watch src/server/cli.ts --no-open --port 4317\" \"vite --config web/vite.config.ts\"",
+    "dev": "concurrently -k -n api,web -c blue,magenta \"WENQU_DEV_ORIGIN=http://localhost:5173 tsx watch src/server/cli.ts --no-open --port 4317\" \"vite --config web/vite.config.ts\"",
     "build": "vite build --config web/vite.config.ts && node scripts/build-server.mjs",
     "start": "node dist/cli.js",
     "test": "vitest run",

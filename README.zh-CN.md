@@ -1,14 +1,18 @@
-# Paper2Podcast
+# 问渠 Wenqu
 
 [English](README.md) | 简体中文
 
-**把论文变成一期能听的播客。**
+> 问渠哪得清如许？为有源头活水来。
+>
+> —— 朱熹《观书有感》
+
+**把论文变成一期能听的播客，也让你随时回到源头。**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Node.js 20+](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)
 ![Status: early](https://img.shields.io/badge/status-early-orange.svg)
 
-论文读不完，通勤路上又看不了 PDF。Paper2Podcast 是一个运行在你电脑上的论文工作台：丢进一篇 PDF 或 arXiv 链接，边读边问 AI，再生成双人对谈的播客和带图的博客。所有内容都是你 Vault 里的普通文件。这个工具不需要注册账号，也没有自己的云端服务。
+论文读不完，通勤路上又看不了 PDF。问渠是一个运行在你电脑上的论文工作台：丢进一篇 PDF 或 arXiv 链接，边读边问 AI，再生成双人对谈的播客和带图的博客。所有内容都是你 Vault 里的普通文件。这个工具不需要注册账号，也没有自己的云端服务。
 
 ![主屏幕正在播放一期播客并同步字幕，侧栏是问答，底部是按主播着色的时间轴](docs/images/zh/podcast-player.png)
 
@@ -33,8 +37,8 @@
 **安装并启动：**
 
 ```bash
-git clone <仓库地址> paper2podcast
-cd paper2podcast
+git clone https://github.com/JoeZhang-0x000/wenqu.git
+cd wenqu
 npm install
 npm run build
 npm start
@@ -46,7 +50,7 @@ npm start
 2. 在「设置 → 语音 API」填入豆包的 API Key，并点「测试连接」。
 3. 把 PDF 拖进页面，或粘贴一个 arXiv 链接。
 
-想在任意目录使用 `paper2podcast` 命令，可以再运行 `npm link`。
+想在任意目录使用 `wenqu` 命令，可以再运行 `npm link`。
 
 ## 功能
 
@@ -101,27 +105,27 @@ Agent 设置决定博客和播客脚本用什么，也是新建问答的默认�
 ## 命令行
 
 ```text
-paper2podcast [start] [--vault <dir>] [--port <n>] [--no-open]   启动服务并打开浏览器
-paper2podcast add <file.pdf|arXiv 链接或编号...> [--vault <dir>]  导入论文
+wenqu [start] [--vault <dir>] [--port <n>] [--no-open]   启动服务并打开浏览器
+wenqu add <file.pdf|arXiv 链接或编号...> [--vault <dir>]  导入论文
 ```
 
 ```bash
-paper2podcast add paper.pdf https://arxiv.org/abs/1706.03762 2005.14165
+wenqu add paper.pdf https://arxiv.org/abs/1706.03762 2005.14165
 ```
 
 ## 配置
 
-配置保存在 `~/.config/paper2podcast/config.json`（权限 600），一般在设置面板里修改即可。命令行提示跟随终端语言（`LANG`），在设置里指定界面语言后则以设置为准。
+配置保存在 `~/.config/wenqu/config.json`（权限 600），一般在设置面板里修改即可。命令行提示跟随终端语言（`LANG`），在设置里指定界面语言后则以设置为准。
 
 | 环境变量 | 作用 |
 |---|---|
 | `DOUBAO_API_KEY` | 豆包 API Key，优先级高于配置文件 |
-| `P2P_CONFIG_DIR` | 配置目录的位置 |
+| `WENQU_CONFIG_DIR` | 配置目录的位置 |
 | `NODE_USE_ENV_PROXY=1` 和 `HTTPS_PROXY` | 让 arXiv 下载走代理（需要 Node 24 及以上） |
 
 ## 数据存放
 
-Vault 默认位于 `~/Paper2Podcast`。即使不用这个工具，里面的内容也能直接打开：
+Vault 默认位于 `~/Wenqu`。即使不用这个工具，里面的内容也能直接打开：
 
 ```text
 <vault>/
@@ -140,6 +144,8 @@ Vault 默认位于 `~/Paper2Podcast`。即使不用这个工具，里面的内�
 ```
 
 API Key 不在 Vault 中，所以同步或分享 Vault 不会泄露 Key。
+
+这个项目最早叫 Paper2Podcast。首次启动时会把 `~/.config/paper2podcast` 里的设置复制过来；如果 Vault 在 `~/Paper2Podcast`，也会继续使用。之后可以自行删除旧的配置目录。
 
 ## 工作原理
 
@@ -228,6 +234,10 @@ docs/         截图和协议笔记
 - [@napi-rs/canvas](https://github.com/Brooooooklyn/canvas)：服务端渲染 PDF 页面
 - [arXiv](https://arxiv.org/)：感谢 arXiv 提供开放访问接口
 - [豆包语音](https://www.volcengine.com/)：播客合成
+
+## 名字的由来
+
+“问渠”出自朱熹的《观书有感》：池塘之所以清澈，是因为有源头活水不断流入。读论文正是回到知识的源头，而提问就是这个工具帮你做的事。
 
 ## 许可证
 

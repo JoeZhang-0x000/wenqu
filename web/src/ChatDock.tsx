@@ -52,21 +52,21 @@ function track(onMove: (dx: number, dy: number) => void, onEnd: () => void, star
 /** Chat beside the main view, floating over it, or tucked away behind a button. */
 export const ChatDock = forwardRef<ChatDockHandle, { busy: boolean; head?: ReactNode; notice?: ReactNode; children: ReactNode }>(
   function ChatDock({ busy, head, notice, children }, ref) {
-    const [mode, setModeState] = useState<Mode>(() => load<Mode>('p2p-chat-mode', 'docked'));
+    const [mode, setModeState] = useState<Mode>(() => load<Mode>('wenqu-chat-mode', 'docked'));
     const [lastVisible, setLastVisible] = useState<Mode>(() => {
-      const saved = load<Mode>('p2p-chat-last', 'docked');
+      const saved = load<Mode>('wenqu-chat-last', 'docked');
       return saved === 'hidden' ? 'docked' : saved;
     });
-    const [width, setWidth] = useState(() => load('p2p-panel-width', 460));
-    const [rect, setRect] = useState<Rect>(() => load('p2p-chat-float', { x: 40, y: 40, w: 420, h: 560 }));
+    const [width, setWidth] = useState(() => load('wenqu-panel-width', 460));
+    const [rect, setRect] = useState<Rect>(() => load('wenqu-chat-float', { x: 40, y: 40, w: 420, h: 560 }));
     const anchorRef = useRef<HTMLDivElement>(null);
 
     const setMode = (next: Mode) => {
       setModeState(next);
-      store('p2p-chat-mode', next);
+      store('wenqu-chat-mode', next);
       if (next !== 'hidden') {
         setLastVisible(next);
-        store('p2p-chat-last', next);
+        store('wenqu-chat-last', next);
       }
     };
 
@@ -111,7 +111,7 @@ export const ChatDock = forwardRef<ChatDockHandle, { busy: boolean; head?: React
           latest = Math.min(Math.max(340, startWidth - dx), window.innerWidth - 360);
           setWidth(latest);
         },
-        () => store('p2p-panel-width', latest),
+        () => store('wenqu-panel-width', latest),
         e,
       );
     };
@@ -126,7 +126,7 @@ export const ChatDock = forwardRef<ChatDockHandle, { busy: boolean; head?: React
           latest = fit({ ...origin, x: origin.x + dx, y: origin.y + dy });
           setRect(latest);
         },
-        () => store('p2p-chat-float', latest),
+        () => store('wenqu-chat-float', latest),
         e,
       );
     };
@@ -140,7 +140,7 @@ export const ChatDock = forwardRef<ChatDockHandle, { busy: boolean; head?: React
           latest = fit({ ...origin, w: origin.w + dx, h: origin.h + dy });
           setRect(latest);
         },
-        () => store('p2p-chat-float', latest),
+        () => store('wenqu-chat-float', latest),
         e,
       );
     };

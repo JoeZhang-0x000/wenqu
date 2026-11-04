@@ -39,7 +39,7 @@ describe('Vault', () => {
   let vault: Vault;
 
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'p2p-vault-'));
+    root = mkdtempSync(join(tmpdir(), 'wenqu-vault-'));
     vault = new Vault(root);
   });
   afterEach(() => rmSync(root, { recursive: true, force: true }));

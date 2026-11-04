@@ -2,7 +2,7 @@ import { t } from '../shared/i18n.js';
 import type { PaperMeta } from '../shared/types.js';
 import type { Vault } from './vault.js';
 
-const USER_AGENT = 'paper2podcast/0.1';
+const USER_AGENT = 'wenqu/0.1';
 const MAX_PDF_BYTES = 200 * 1024 * 1024;
 
 const NEW_ID = /^\d{4}\.\d{4,5}(?:v\d+)?$/;

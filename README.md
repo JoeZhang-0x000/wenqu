@@ -1,14 +1,19 @@
-# Paper2Podcast
+# Wenqu 问渠
 
 English | [简体中文](README.zh-CN.md)
 
-**Turn research papers into podcasts you can listen to.**
+> 问渠哪得清如许？为有源头活水来。
+>
+> *How can the water run so clear? Because fresh water keeps flowing from its source.*
+> — Zhu Xi, “Reflections on Reading”
+
+**Turn research papers into podcasts you can listen to, and go back to the source.**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Node.js 20+](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)
 ![Status: early](https://img.shields.io/badge/status-early-orange.svg)
 
-There are more papers than time to read them, and a PDF is no use on your commute. Paper2Podcast is a paper workbench that runs on your own computer. Drop in a PDF or an arXiv link, ask AI questions as you read, then generate a two-host podcast and an illustrated blog post. Everything is stored as plain files in your vault. There is no account to create, and the tool has no cloud service of its own.
+There are more papers than time to read them, and a PDF is no use on your commute. Wenqu is a paper workbench that runs on your own computer. Drop in a PDF or an arXiv link, ask AI questions as you read, then generate a two-host podcast and an illustrated blog post. Everything is stored as plain files in your vault. There is no account to create, and the tool has no cloud service of its own.
 
 ![An episode playing in the main area with a synced transcript, chat in the sidebar, and a timeline colored by host at the bottom](docs/images/podcast-player.png)
 
@@ -33,8 +38,8 @@ There are more papers than time to read them, and a PDF is no use on your commut
 **Install and run:**
 
 ```bash
-git clone <repository-url> paper2podcast
-cd paper2podcast
+git clone https://github.com/JoeZhang-0x000/wenqu.git
+cd wenqu
 npm install
 npm run build
 npm start
@@ -46,7 +51,7 @@ Your browser opens automatically. Then:
 2. Open **Settings → Voice API**, enter your Doubao API key, and click **Test connection**.
 3. Drag a PDF onto the page, or paste an arXiv link.
 
-To use the `paper2podcast` command from any directory, also run `npm link`.
+To use the `wenqu` command from any directory, also run `npm link`.
 
 ## Features
 
@@ -101,27 +106,27 @@ In the library, click **Make collection**, select 2 to 12 papers, then choose a 
 ## Command line
 
 ```text
-paper2podcast [start] [--vault <dir>] [--port <n>] [--no-open]       Start the server and open a browser
-paper2podcast add <file.pdf|arXiv link or id...> [--vault <dir>]     Import papers
+wenqu [start] [--vault <dir>] [--port <n>] [--no-open]       Start the server and open a browser
+wenqu add <file.pdf|arXiv link or id...> [--vault <dir>]     Import papers
 ```
 
 ```bash
-paper2podcast add paper.pdf https://arxiv.org/abs/1706.03762 2005.14165
+wenqu add paper.pdf https://arxiv.org/abs/1706.03762 2005.14165
 ```
 
 ## Configuration
 
-Settings are stored in `~/.config/paper2podcast/config.json` (mode 600). You will normally change them in the settings panel. Command-line messages follow your terminal's language (`LANG`) unless you have chosen an interface language in Settings.
+Settings are stored in `~/.config/wenqu/config.json` (mode 600). You will normally change them in the settings panel. Command-line messages follow your terminal's language (`LANG`) unless you have chosen an interface language in Settings.
 
 | Environment variable | Purpose |
 |---|---|
 | `DOUBAO_API_KEY` | Doubao API key; takes precedence over the config file |
-| `P2P_CONFIG_DIR` | Location of the config directory |
+| `WENQU_CONFIG_DIR` | Location of the config directory |
 | `NODE_USE_ENV_PROXY=1` with `HTTPS_PROXY` | Send arXiv downloads through a proxy (Node 24 or later) |
 
 ## Your data
 
-The vault lives in `~/Paper2Podcast` by default. Its contents remain usable without this tool:
+The vault lives in `~/Wenqu` by default. Its contents remain usable without this tool:
 
 ```text
 <vault>/
@@ -140,6 +145,8 @@ The vault lives in `~/Paper2Podcast` by default. Its contents remain usable with
 ```
 
 Your API key is not stored in the vault, so syncing or sharing a vault does not expose it.
+
+The project was first called Paper2Podcast. Settings in `~/.config/paper2podcast` are copied over the first time Wenqu starts, and a vault at `~/Paper2Podcast` keeps being used. You can delete the old config folder afterwards.
 
 ## How it works
 
@@ -228,6 +235,10 @@ docs/         Screenshots and protocol notes
 - [@napi-rs/canvas](https://github.com/Brooooooklyn/canvas): server-side PDF page rendering
 - [arXiv](https://arxiv.org/): thank you for open access to its API
 - [Doubao Speech](https://www.volcengine.com/): podcast synthesis
+
+## The name
+
+*Wenqu* (问渠, “ask the pond”) comes from Zhu Xi's poem above, about a clear pond that stays clear because fresh water keeps flowing in. Going back to the source is what reading a paper is for, and asking is how this tool helps you do it.
 
 ## License
 

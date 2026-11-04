@@ -112,7 +112,7 @@ export function runAgent(req: AgentRequest): Promise<string> {
   if (req.thinking && !/^[a-z]+$/.test(req.thinking)) return Promise.reject(new Error(t('思考强度无效：{level}', { level: req.thinking })));
 
   return new Promise((resolve, reject) => {
-    const cwd = mkdtempSync(join(tmpdir(), 'p2p-agent-'));
+    const cwd = mkdtempSync(join(tmpdir(), 'wenqu-agent-'));
     const child = spawn(req.backend, adapter.args(req), { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
     let text = '';
     let stderr = '';

@@ -77,7 +77,7 @@ export function createApp({ config, devOrigin }: AppOptions) {
       return;
     }
     // One user on one machine, so the last request's language applies to the whole server.
-    const locale = req.headers['x-p2p-locale'];
+    const locale = req.headers['x-wenqu-locale'];
     if (locale === 'zh' || locale === 'en') setLocale(locale);
     next();
   });
