@@ -70,7 +70,12 @@ export class Jobs extends EventEmitter {
         const canceled = controller.signal.aborted;
         job.status = canceled ? 'canceled' : 'failed';
         job.error = err.message;
-        await onFailure?.(err.message, canceled);
+        // An unhandled rejection here would take the whole server down.
+        try {
+          await onFailure?.(err.message, canceled);
+        } catch (failure) {
+          console.error(failure);
+        }
       })
       .finally(() => {
         job.finishedAt = new Date().toISOString();

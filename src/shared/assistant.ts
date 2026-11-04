@@ -75,10 +75,12 @@ export function parseReply(raw: string): ParsedReply {
       .replace(/^```[\w-]*\s*|\s*```$/g, '');
     try {
       const parsed: unknown = JSON.parse(body);
-      for (const item of Array.isArray(parsed) ? parsed : [parsed]) {
+      // All or nothing, because the agent is told a block it can't read wasn't run.
+      const entries = (Array.isArray(parsed) ? parsed : [parsed]).map((item) => {
         if (!isRecord(item) || typeof item.tool !== 'string') throw new Error('each entry needs a "tool" name');
-        calls.push({ tool: item.tool, args: isRecord(item.args) ? item.args : {} });
-      }
+        return { tool: item.tool, args: isRecord(item.args) ? item.args : {} };
+      });
+      calls.push(...entries);
     } catch (err) {
       error = `The action block is not valid: ${(err as Error).message}`;
     }

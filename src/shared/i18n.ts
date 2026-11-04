@@ -32,6 +32,7 @@ const en = {
   // Assistant
   '助手：{title}': 'Assistant: {title}',
   '操作被中断': 'Interrupted',
+  方式: 'Method',
   '没有等待审批的操作': 'Nothing is waiting for approval',
   '这一轮的步骤已达上限，已经先停下。可以回复“继续”接着做。': 'This took too many steps, so it stopped here. Reply "continue" to keep going.',
   '无效的操作请求：{tool}': 'Invalid action request: {tool}',

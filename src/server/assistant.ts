@@ -43,7 +43,7 @@ export interface AssistantDeps {
   runAgent(req: AgentRequest): Promise<string>;
   searchArxiv(vault: Vault, query: string, options: { maxResults?: number; sort?: 'relevance' | 'recent' }): Promise<ArxivHit[]>;
   lookupArxiv(vault: Vault, inputs: string[]): Promise<ArxivLookup[]>;
-  importArxiv(vault: Vault, input: string): Promise<{ meta: { id: string; title: string }; duplicate: boolean }>;
+  importArxiv(vault: Vault, input: string, signal?: AbortSignal): Promise<{ meta: { id: string; title: string }; duplicate: boolean }>;
   startBlog(ownerId: string, body: Record<string, unknown>): { job: Job; blogId: string };
   startPodcast(ownerId: string, body: Record<string, unknown>): { job: Job; podcastId: string };
   synthesize(ownerId: string, podcastId: string): Job;
@@ -65,8 +65,8 @@ interface Outcome {
 }
 
 interface PrepareContext {
-  /** Base ids of the papers that `add_arxiv` calls earlier in this reply will add. */
-  incoming: Map<string, string>;
+  /** The papers that `add_arxiv` calls earlier in this reply will add, by id without its version. */
+  incoming: Map<string, { id: string; title: string }>;
   /** Looked up together, because arXiv's pacing would make one call per paper slow. */
   lookups: Map<string, ArxivLookup>;
 }
@@ -79,7 +79,7 @@ interface Tool {
   long?: boolean;
   /** Validates the arguments and describes the action, with no side effects. */
   prepare(args: Args, ctx: PrepareContext): Promise<Prepared> | Prepared;
-  run(args: Args, ctx: JobContext): Promise<Outcome> | Outcome;
+  run(args: Args, ctx: JobContext, session: AssistantSession): Promise<Outcome> | Outcome;
 }
 
 /** A problem with what the agent asked for. It goes back to the agent, which can correct itself. */
@@ -120,13 +120,14 @@ function choiceArg(args: Args, key: string, choices: string[]): string | undefin
 /** Keeps what was given, so defaults keep following the user's settings until an action runs. */
 const defined = (values: Args): Args => Object.fromEntries(Object.entries(values).filter(([, v]) => v !== undefined));
 
-const describeHit = (hit: ArxivHit) => ({
+/** What's in the library is only mentioned once the agent may read it, because searching doesn't ask first. */
+const describeHit = (hit: ArxivHit, canReadLibrary: boolean) => ({
   arxivId: hit.arxivId,
   title: hit.title,
   authors: hit.authors.slice(0, 6),
   year: hit.year,
   abstract: hit.abstract ? clip(hit.abstract, 600) : undefined,
-  inLibraryAs: hit.paperId,
+  inLibraryAs: canReadLibrary ? hit.paperId : undefined,
 });
 
 const describePaper = (p: PaperSummary) => ({
@@ -315,13 +316,13 @@ export class Assistant {
           tools: this.toolDocs(),
           messages: session.messages,
           today: new Date().toISOString().slice(0, 10),
-          paperCount: this.vault.listPapers().length,
         }),
         onDelta: ctx.delta,
         signal: ctx.signal,
       });
       const { text, calls, error } = parseReply(raw);
       const actions = await this.prepareAll(calls, session, error);
+      ctx.signal.throwIfAborted();
       this.addMessage(id, {
         role: 'assistant',
         content: text,
@@ -345,7 +346,11 @@ export class Assistant {
   private needsApproval(access: AssistantAccess, session: AssistantSession): boolean {
     if (access === 'write') return true;
     if (access === 'external') return false;
-    return !session.allowReads && !this.deps.settings().assistant.autoApproveReads;
+    return !this.canReadLibrary(session);
+  }
+
+  private canReadLibrary(session: AssistantSession): boolean {
+    return session.allowReads || this.deps.settings().assistant.autoApproveReads;
   }
 
   /** Bad requests become failed actions that go back to the agent. They never reach the user to approve. */
@@ -423,7 +428,7 @@ export class Assistant {
     ctx.signal.throwIfAborted();
     this.patchAction(id, action.id, { status: 'running' });
     try {
-      const outcome = await this.tools[action.tool].run(action.args, ctx);
+      const outcome = await this.tools[action.tool].run(action.args, ctx, this.vault.getAssistantSession(id));
       this.patchAction(id, action.id, { status: 'done', ...outcome });
     } catch (err) {
       if (ctx.signal.aborted) throw err;
@@ -464,11 +469,20 @@ export class Assistant {
     return { id: paper.id, title: paper.title };
   }
 
-  /** Like `resolveOwner`, but also accepts a paper that this same batch is about to add. */
-  private resolveOwnerInBatch(ref: string, ctx: PrepareContext): { title: string } {
+  /**
+   * Like `resolveOwner`, but also accepts a paper that this same batch is about to add.
+   * The ref it returns is what runs, so it can't come to mean a different paper by then.
+   */
+  private resolveOwnerInBatch(ref: string, ctx: PrepareContext): { ref: string; title: string } {
     const arxivId = parseArxivInput(ref);
-    const incoming = arxivId ? ctx.incoming.get(withoutArxivVersion(arxivId)) : undefined;
-    return incoming ? { title: incoming } : this.resolveOwner(ref);
+    const known = !arxivId || this.vault.findArxiv(arxivId);
+    if (known) {
+      const { id, title } = this.resolveOwner(ref);
+      return { ref: id, title };
+    }
+    const incoming = ctx.incoming.get(withoutArxivVersion(arxivId));
+    if (!incoming) throw new ToolError(`"${ref}" is not in the library, and no earlier action in this block adds it.`);
+    return { ref: incoming.id, title: incoming.title };
   }
 
   private assertUnused(paperId: string): void {
@@ -587,12 +601,12 @@ export class Assistant {
             summary: t('在 arXiv 搜索：{query}', { query }),
           };
         },
-        run: async (args) => {
+        run: async (args, _ctx, session) => {
           const hits = await this.deps.searchArxiv(this.vault, args.query as string, {
             maxResults: args.max_results as number | undefined,
             sort: args.sort as 'relevance' | 'recent' | undefined,
           });
-          return { result: JSON.stringify(hits.map(describeHit)), note: t('{count} 篇论文', { count: hits.length }), hits };
+          return { result: JSON.stringify(hits.map((hit) => describeHit(hit, this.canReadLibrary(session)))), note: t('{count} 篇论文', { count: hits.length }), hits };
         },
       },
 
@@ -603,10 +617,10 @@ export class Assistant {
           const input = requireString(args, 'input', 300);
           const lookup = ctx.lookups.get(input);
           if (!lookup?.id) throw new ToolError(`"${input}" is not an arXiv id or link.`);
-          if (lookup.paperId) throw new ToolError(`Already in the library as "${lookup.paperId}".`);
+          if (lookup.paperId) throw new ToolError('Already in the library.');
           if (lookup.status === 'missing') throw new ToolError(`arXiv has no paper ${lookup.id}.`);
           const title = lookup.meta?.title ?? lookup.id;
-          ctx.incoming.set(withoutArxivVersion(lookup.id), title);
+          ctx.incoming.set(withoutArxivVersion(lookup.id), { id: lookup.id, title });
           return {
             args: { input: lookup.id },
             summary: t('从 arXiv 添加：{title}', { title }),
@@ -617,8 +631,8 @@ export class Assistant {
             ],
           };
         },
-        run: async (args) => {
-          const { meta, duplicate } = await this.deps.importArxiv(this.vault, args.input as string);
+        run: async (args, ctx) => {
+          const { meta, duplicate } = await this.deps.importArxiv(this.vault, args.input as string, ctx.signal);
           return {
             result: JSON.stringify({ id: meta.id, title: meta.title, alreadyInLibrary: duplicate }),
             note: duplicate ? t('已在书架中') : undefined,
@@ -645,7 +659,8 @@ export class Assistant {
           }
           const details: NonNullable<AssistantAction['details']> = [];
           const change = (label: string, before: string, after: string | undefined) => {
-            if (after !== undefined && after !== before) details.push({ label, before: clip(before, 400), value: clip(after, 400) });
+            // The new value is shown whole, because it's what gets stored.
+            if (after !== undefined && after !== before) details.push({ label, before: clip(before, 400), value: after });
           };
           change(t('标题'), current.title, title);
           change(t('作者'), current.authors.join(', '), authors?.join(', '));
@@ -690,7 +705,8 @@ export class Assistant {
         prepare: (args) => {
           const title = requireString(args, 'title', 200);
           if (!Array.isArray(args.papers)) throw new ToolError('"papers" must be an array of paper ids.');
-          const ids = [...new Set((args.papers as unknown[]).map(String))].map((ref) => this.resolveOwnerPaper(ref));
+          const resolved = (args.papers as unknown[]).map((ref) => this.resolveOwnerPaper(String(ref)));
+          const ids = [...new Map(resolved.map((p) => [p.id, p])).values()];
           if (ids.length < 2 || ids.length > MAX_COLLECTION_PAPERS) throw new ToolError(`A collection needs 2 to ${MAX_COLLECTION_PAPERS} papers.`);
           return {
             args: { title, papers: ids.map((p) => p.id) },
@@ -710,28 +726,47 @@ export class Assistant {
         long: true,
         doc: `Writes a podcast script for a paper or collection with an agent, and optionally synthesizes the audio. Leave options out to use the user's settings. args: paper (id, collection id, or the arXiv id of a paper added earlier in this block), style? (${styles.join(', ')}), language? (${languages.join(', ')}), length? (${lengths.join(', ')}), instructions?, synthesize? (true also produces audio, which uses the user's paid speech service).`,
         prepare: (args, ctx) => {
-          const paper = requireString(args, 'paper', 300);
-          const { title } = this.resolveOwnerInBatch(paper, ctx);
+          const { ref, title } = this.resolveOwnerInBatch(requireString(args, 'paper', 300), ctx);
           const defaults = this.deps.settings().podcast;
-          const style = choiceArg(args, 'style', styles);
-          const language = choiceArg(args, 'language', languages);
-          const length = choiceArg(args, 'length', lengths);
+          const askedStyle = choiceArg(args, 'style', styles);
+          const askedLength = choiceArg(args, 'length', lengths);
           const instructions = stringArg(args, 'instructions');
-          const synthesize = args.synthesize === true;
-          const styleId = style ?? defaults.style;
+          const language = choiceArg(args, 'language', languages) ?? defaults.language;
           const hasVoice = this.deps.hasVoiceKey();
-          if (defaults.engine === 'doubao' && !isCollectionId(paper) && !hasVoice) throw new ToolError('The default engine needs a speech API key, and none is set.');
+          // Direct generation has no script to shape, so asking for any of these means an agent writes it.
+          const specific = Boolean(askedStyle || askedLength || instructions);
+          const engine = isCollectionId(ref) || specific ? 'agent' : defaults.engine;
+          if (engine === 'doubao' && !hasVoice) throw new ToolError('The default engine needs a speech API key, and none is set.');
+          const synthesize = args.synthesize === true;
+          const audio =
+            engine === 'doubao' || (synthesize && hasVoice)
+              ? [{ label: t('音频'), value: t('会调用语音服务合成音频，可能产生费用') }]
+              : synthesize
+                ? [{ label: t('音频'), value: t('没有配置语音 API Key，只会生成脚本') }]
+                : [];
+          const style = askedStyle ?? defaults.style;
+          const length = askedLength ?? defaults.length;
+          // Every choice is settled now, so changing a setting later can't change what was approved.
+          const shared = { paper: ref, language, engine };
+          if (engine === 'doubao') {
+            return { args: shared, summary: t('生成播客：{title}', { title }), details: [{ label: t('方式'), value: t('豆包直出') }, ...audio] };
+          }
           return {
-            args: defined({ paper, style, language, length, instructions, synthesize: synthesize || undefined }),
+            args: defined({
+              ...shared,
+              style,
+              customStyle: style === 'custom' ? defaults.customStyle : undefined,
+              length,
+              instructions,
+              synthesize: (synthesize && hasVoice) || undefined,
+            }),
             summary: t('生成播客：{title}', { title }),
             details: [
-              { label: t('风格'), value: tx(PODCAST_STYLES.find((s) => s.id === styleId)?.label ?? t('自定义')) },
-              { label: t('语言'), value: LANGUAGES.find((l) => l.id === (language ?? defaults.language))?.label ?? (language ?? defaults.language) },
-              { label: t('长度'), value: tx(PODCAST_LENGTHS.find((l) => l.id === (length ?? defaults.length))?.label ?? '') },
-              ...(instructions ? [{ label: t('额外要求'), value: clip(instructions, 300) }] : []),
-              ...(synthesize || defaults.engine === 'doubao'
-                ? [{ label: t('音频'), value: hasVoice ? t('会调用语音服务合成音频，可能产生费用') : t('没有配置语音 API Key，只会生成脚本') }]
-                : []),
+              { label: t('风格'), value: tx(PODCAST_STYLES.find((s) => s.id === style)?.label ?? t('自定义')) },
+              { label: t('语言'), value: LANGUAGES.find((l) => l.id === language)?.label ?? language },
+              { label: t('长度'), value: tx(PODCAST_LENGTHS.find((l) => l.id === length)?.label ?? length) },
+              ...(instructions ? [{ label: t('额外要求'), value: instructions }] : []),
+              ...audio,
             ],
           };
         },
@@ -739,8 +774,10 @@ export class Assistant {
           const { id: ownerId } = this.resolveOwner(args.paper as string);
           const { podcastId } = this.deps.startPodcast(ownerId, {
             style: args.style,
+            customStyle: args.customStyle,
             language: args.language,
             length: args.length,
+            engine: args.engine,
             instructions: args.instructions,
             autoSynthesize: args.synthesize === true,
           });
@@ -760,25 +797,24 @@ export class Assistant {
         long: true,
         doc: `Writes a blog post about a paper or collection with an agent. args: paper (as for generate_podcast), style? (${blogStyles.join(', ')}), language? (${languages.join(', ')}), instructions?.`,
         prepare: (args, ctx) => {
-          const paper = requireString(args, 'paper', 300);
-          const { title } = this.resolveOwnerInBatch(paper, ctx);
+          const { ref, title } = this.resolveOwnerInBatch(requireString(args, 'paper', 300), ctx);
           const defaults = this.deps.settings().blog;
-          const style = choiceArg(args, 'style', blogStyles);
-          const language = choiceArg(args, 'language', languages);
+          const style = choiceArg(args, 'style', blogStyles) ?? defaults.style;
+          const language = choiceArg(args, 'language', languages) ?? defaults.language;
           const instructions = stringArg(args, 'instructions');
           return {
-            args: defined({ paper, style, language, instructions }),
+            args: defined({ paper: ref, style, customStyle: style === 'custom' ? defaults.customStyle : undefined, language, instructions }),
             summary: t('生成博客：{title}', { title }),
             details: [
-              { label: t('风格'), value: tx(BLOG_STYLES.find((s) => s.id === (style ?? defaults.style))?.label ?? t('自定义')) },
-              { label: t('语言'), value: LANGUAGES.find((l) => l.id === (language ?? defaults.language))?.label ?? (language ?? defaults.language) },
-              ...(instructions ? [{ label: t('额外要求'), value: clip(instructions, 300) }] : []),
+              { label: t('风格'), value: tx(BLOG_STYLES.find((s) => s.id === style)?.label ?? t('自定义')) },
+              { label: t('语言'), value: LANGUAGES.find((l) => l.id === language)?.label ?? language },
+              ...(instructions ? [{ label: t('额外要求'), value: instructions }] : []),
             ],
           };
         },
         run: async (args, ctx) => {
           const { id: ownerId } = this.resolveOwner(args.paper as string);
-          const { blogId } = this.deps.startBlog(ownerId, { style: args.style, language: args.language, instructions: args.instructions });
+          const { blogId } = this.deps.startBlog(ownerId, { style: args.style, customStyle: args.customStyle, language: args.language, instructions: args.instructions });
           await this.waitFor(blogId, ctx);
           const blog = this.vault.getBlog(ownerId, blogId);
           return {
@@ -861,10 +897,12 @@ function pendingActions(session: AssistantSession): AssistantAction[] {
   return session.messages.flatMap((m) => m.actions ?? []).filter((a) => a.status === 'pending');
 }
 
+/** Waits for every worker even after one fails, so nothing is still changing once this returns. */
 async function pool<T>(items: T[], size: number, run: (item: T) => Promise<void>): Promise<void> {
   let next = 0;
   const worker = async () => {
     while (next < items.length) await run(items[next++]);
   };
-  await Promise.all(Array.from({ length: Math.min(size, items.length) }, worker));
+  const results = await Promise.allSettled(Array.from({ length: Math.min(size, items.length) }, worker));
+  for (const result of results) if (result.status === 'rejected') throw result.reason;
 }

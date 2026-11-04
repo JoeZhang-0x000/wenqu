@@ -90,22 +90,23 @@ export function resetApiPacing(): void {
 }
 
 /** Queues the call for its turn, which also spaces out the imports in a batch. */
-async function apiRequest(url: string, timeoutMs?: number): Promise<Response> {
+async function apiRequest(url: string, timeoutMs?: number, signal?: AbortSignal): Promise<Response> {
   const now = Date.now();
   const wait = Math.max(0, nextApiSlot - now);
   nextApiSlot = Math.max(now, nextApiSlot) + API_SPACING_MS;
   if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
-  return request(url, undefined, timeoutMs);
+  signal?.throwIfAborted();
+  return request(url, signal, timeoutMs);
 }
 
-async function fetchMeta(id: string): Promise<ArxivMeta | null> {
-  const res = await apiRequest(`https://export.arxiv.org/api/query?id_list=${encodeURIComponent(id)}`);
+async function fetchMeta(id: string, signal?: AbortSignal): Promise<ArxivMeta | null> {
+  const res = await apiRequest(`https://export.arxiv.org/api/query?id_list=${encodeURIComponent(id)}`, undefined, signal);
   if (!res.ok) throw new Error(t('arXiv API 返回 {status}', { status: res.status }));
   return parseArxivFeed(await res.text());
 }
 
-async function fetchPdf(id: string): Promise<Buffer> {
-  const res = await request(`https://arxiv.org/pdf/${id}`);
+async function fetchPdf(id: string, signal?: AbortSignal): Promise<Buffer> {
+  const res = await request(`https://arxiv.org/pdf/${id}`, signal);
   if (res.status === 404) throw new Error(t('arXiv 上找不到 {id}', { id }));
   if (!res.ok || !res.body) throw new Error(t('下载 PDF 失败：HTTP {status}', { status: res.status }));
   const chunks: Buffer[] = [];
@@ -183,7 +184,7 @@ export async function searchArxiv(
   }));
 }
 
-export async function importArxiv(vault: Vault, input: string) {
+export async function importArxiv(vault: Vault, input: string, signal?: AbortSignal) {
   const id = parseArxivInput(input);
   if (!id) throw new Error(t('这不是有效的 arXiv 链接或编号'));
   const existing = vault.findArxiv(id);
@@ -193,12 +194,14 @@ export async function importArxiv(vault: Vault, input: string) {
   let meta: ArxivMeta | null = null;
   let metaLoaded = false;
   try {
-    meta = await fetchMeta(id);
+    meta = await fetchMeta(id, signal);
     metaLoaded = true;
   } catch {
     /* Falls back to what can be read from the PDF. */
   }
+  signal?.throwIfAborted();
   if (metaLoaded && !meta) throw new Error(t('arXiv 上找不到 {id}', { id }));
-  const pdf = await fetchPdf(id);
+  const pdf = await fetchPdf(id, signal);
+  signal?.throwIfAborted();
   return vault.importPdf(pdf, `${(meta?.arxivId ?? id).replace('/', '_')}.pdf`, meta ?? { arxivId: id });
 }
