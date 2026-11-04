@@ -121,12 +121,13 @@ export function createApp({ config, devOrigin }: AppOptions) {
 
   api.get('/agents', async (req, res) => res.json(await detectAgents(Boolean(req.query.refresh))));
   api.post('/agents/test', json, async (req, res) => {
-    const { backend, model } = req.body as { backend: AgentBackend; model?: string };
+    const { backend, model, thinking } = req.body as { backend: AgentBackend; model?: string; thinking?: string };
     const started = Date.now();
     try {
       const reply = await runAgent({
         backend,
         model: model || undefined,
+        thinking: thinking || undefined,
         system: 'You are a connectivity check.',
         prompt: 'Reply with exactly: OK',
         signal: AbortSignal.timeout(90_000),
@@ -137,12 +138,13 @@ export function createApp({ config, devOrigin }: AppOptions) {
     }
   });
 
-  const agentChoice = (body: { backend?: AgentBackend; model?: string }) => {
+  const agentChoice = (body: { backend?: AgentBackend; model?: string; thinking?: string }) => {
     const { agent } = config.get();
     const backend = body.backend ?? agent.backend;
-    return { backend, model: body.model ?? agent.models[backend] ?? '' };
+    return { backend, model: body.model ?? agent.models[backend] ?? '', thinking: body.thinking ?? agent.thinking[backend] ?? '' };
   };
-  const agentLabel = (a: { backend: AgentBackend; model: string }) => (a.model ? `${a.backend} · ${a.model}` : a.backend);
+  const agentLabel = (a: { backend: AgentBackend; model: string; thinking?: string }) =>
+    [a.backend, a.model, a.thinking].filter(Boolean).join(' · ');
 
   // Doubao ------------------------------------------------------------------
 
@@ -667,10 +669,11 @@ export function createApp({ config, devOrigin }: AppOptions) {
     history: ChatMessage[],
     harness: AgentBackend,
     model: string,
+    thinking: string,
     body: { message: string; selection?: string; page?: number },
   ) => {
     const ctx = paperContext(paperId);
-    const agent = { backend: harness, model };
+    const agent = { backend: harness, model, thinking };
     const user: ChatMessage = {
       role: 'user',
       content: body.message.trim(),
@@ -708,20 +711,27 @@ export function createApp({ config, devOrigin }: AppOptions) {
     const harness = (req.body.harness ?? config.get().agent.backend) as AgentBackend;
     if (!AGENT_BACKENDS.includes(harness)) throw new BadRequest(t('未知的 Agent 后端：{backend}', { backend: String(harness) }));
     const model = String(req.body.model ?? '');
-    const session = vault.createChat(req.params.id, req.body.message, harness, model);
-    res.json({ sessionId: session.id, ...askInSession(req.params.id, session.id, [], harness, model, req.body) });
+    const thinking = String(req.body.thinking ?? '');
+    const session = vault.createChat(req.params.id, req.body.message, harness, model, thinking);
+    res.json({ sessionId: session.id, ...askInSession(req.params.id, session.id, [], harness, model, thinking, req.body) });
   });
 
   api.post('/papers/:id/chats/:sessionId/messages', json, (req, res) => {
     if (!req.body?.message?.trim()) throw new BadRequest(t('问题不能为空'));
     const session = vault.getChat(req.params.id, req.params.sessionId);
     if (jobs.isActive(session.id)) throw new BadRequest(t('这个会话正在回答，请等它结束'));
-    res.json(askInSession(req.params.id, session.id, session.messages, session.harness, session.model, req.body));
+    res.json(askInSession(req.params.id, session.id, session.messages, session.harness, session.model, session.thinking, req.body));
   });
 
-  /** The model can change at any time. The harness can't, so it isn't accepted here. */
+  /** The model and thinking level can change at any time. The harness can't, so it isn't accepted here. */
   api.patch('/papers/:id/chats/:sessionId', json, (req, res) => {
-    res.json(vault.updateChat(req.params.id, req.params.sessionId, { model: String(req.body?.model ?? '') }));
+    const { model, thinking } = req.body ?? {};
+    res.json(
+      vault.updateChat(req.params.id, req.params.sessionId, {
+        ...(model !== undefined ? { model: String(model) } : {}),
+        ...(thinking !== undefined ? { thinking: String(thinking) } : {}),
+      }),
+    );
   });
 
   api.delete('/papers/:id/chats/:sessionId', (req, res) => {

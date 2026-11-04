@@ -438,7 +438,7 @@ export class Vault {
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
-  createChat(paperId: string, firstQuestion: string, harness: AgentBackend, model = ''): ChatSession {
+  createChat(paperId: string, firstQuestion: string, harness: AgentBackend, model = '', thinking = ''): ChatSession {
     const now = new Date().toISOString();
     const title = firstQuestion.trim().replace(/\s+/g, ' ');
     const session: ChatSession = {
@@ -446,6 +446,7 @@ export class Vault {
       title: title.length > 60 ? `${title.slice(0, 60)}…` : title,
       harness,
       model,
+      thinking,
       messageCount: 0,
       createdAt: now,
       updatedAt: now,
@@ -467,7 +468,7 @@ export class Vault {
     this.writeChat(paperId, { ...session, messages, messageCount: messages.length, updatedAt: message.at });
   }
 
-  updateChat(paperId: string, sessionId: string, patch: Pick<ChatSession, 'model'>): ChatSession {
+  updateChat(paperId: string, sessionId: string, patch: Partial<Pick<ChatSession, 'model' | 'thinking'>>): ChatSession {
     const next = { ...this.getChat(paperId, sessionId), ...patch };
     this.writeChat(paperId, next);
     return next;

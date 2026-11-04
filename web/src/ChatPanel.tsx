@@ -35,7 +35,11 @@ export function ChatPanel({
   const sessionHarness = sessions?.find((s) => s.id === sessionId)?.harness ?? (session?.id === sessionId ? session?.harness : undefined);
   const harness = sessionId ? sessionHarness : draftHarness;
   const [draftModel, setDraftModel] = useState<string | null>(null);
-  const model = sessionId ? (session?.id === sessionId ? session.model : '') : (draftModel ?? (draftHarness ? settings.agent.models[draftHarness] : '') ?? '');
+  const [draftThinking, setDraftThinking] = useState<string | null>(null);
+  const current = session?.id === sessionId ? session : undefined;
+  const model = sessionId ? (current?.model ?? '') : (draftModel ?? (draftHarness ? settings.agent.models[draftHarness] : '') ?? '');
+  const thinking = sessionId ? (current?.thinking ?? '') : (draftThinking ?? (draftHarness ? settings.agent.thinking[draftHarness] : '') ?? '');
+  const agent = agents?.find((a) => a.backend === harness);
   const [input, setInput] = useState('');
   const [quote, setQuote] = useState<{ text: string; page?: number } | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
@@ -70,7 +74,7 @@ export function ChatPanel({
         const res = await api<{ message: ChatMessage }>(`/papers/${paperId}/chats/${sessionId}/messages`, { body });
         setSession((current) => (current ? { ...current, messages: [...current.messages, res.message] } : current));
       } else {
-        const res = await api<{ sessionId: string }>(`/papers/${paperId}/chats`, { body: { ...body, harness: draftHarness, model } });
+        const res = await api<{ sessionId: string }>(`/papers/${paperId}/chats`, { body: { ...body, harness: draftHarness, model, thinking } });
         setSessionId(res.sessionId);
       }
     } catch (err) {
@@ -97,6 +101,19 @@ export function ChatPanel({
     setShowHistory(false);
     setQuote(null);
     inputRef.current?.focus();
+  };
+
+  const updateAgent = async (nextModel: string, nextThinking: string) => {
+    if (!sessionId) {
+      setDraftModel(nextModel);
+      setDraftThinking(nextThinking);
+      return;
+    }
+    try {
+      setSession(await api<ChatSession>(`/papers/${paperId}/chats/${sessionId}`, { method: 'PATCH', body: { model: nextModel, thinking: nextThinking } }));
+    } catch (err) {
+      fail(err);
+    }
   };
 
   const remove = async (id: string) => {
@@ -197,6 +214,7 @@ export function ChatPanel({
                 onClick={() => {
                   setPickedHarness(id);
                   setDraftModel(null);
+                  setDraftThinking(null);
                 }}
               >
                 {id}
@@ -227,18 +245,18 @@ export function ChatPanel({
           />
           <div className="chat-actions">
             {harness && (
-              <ModelSelect
-                agent={agents?.find((a) => a.backend === harness)}
-                value={model}
-                onChange={async (next) => {
-                  if (!sessionId) return setDraftModel(next);
-                  try {
-                    setSession(await api<ChatSession>(`/papers/${paperId}/chats/${sessionId}`, { method: 'PATCH', body: { model: next } }));
-                  } catch (err) {
-                    fail(err);
-                  }
-                }}
-              />
+              <>
+                <ModelSelect
+                  agent={agent}
+                  value={model}
+                  onChange={(next) => {
+                    // A level the new model doesn't accept falls back to its default.
+                    const keep = effortsOf(agent, next).includes(thinking) ? thinking : '';
+                    void updateAgent(next, keep);
+                  }}
+                />
+                <EffortSelect agent={agent} model={model} value={thinking} onChange={(next) => updateAgent(model, next)} />
+              </>
             )}
             <div className="spacer" />
             {running ? (
@@ -254,6 +272,29 @@ export function ChatPanel({
         </div>
       </div>
     </div>
+  );
+}
+
+/** The levels a model accepts. Without a chosen model, those of the harness's default. */
+function effortsOf(agent: AgentStatus | undefined, model: string): string[] {
+  if (!agent) return [];
+  const found = agent.models.find((m) => m.id === (model || agent.defaultModel));
+  return found ? found.efforts : agent.efforts;
+}
+
+function EffortSelect({ agent, model, value, onChange }: { agent?: AgentStatus; model: string; value: string; onChange(level: string): void }) {
+  const efforts = effortsOf(agent, model);
+  if (!efforts.length) return null;
+  // A level set in the harness's config applies to every model.
+  const fallback = agent?.defaultEffort ?? agent?.models.find((m) => m.id === model)?.defaultEffort;
+  return (
+    <select className="model-select mono" aria-label={t('思考强度')} title={t('思考强度')} value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">{fallback ? t('默认（{model}）', { model: fallback }) : t('默认强度')}</option>
+      {value && !efforts.includes(value) && <option value={value}>{value}</option>}
+      {efforts.map((level) => (
+        <option key={level} value={level}>{level}</option>
+      ))}
+    </select>
   );
 }
 

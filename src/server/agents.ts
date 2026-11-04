@@ -8,6 +8,8 @@ import type { AgentBackend } from '../shared/types.js';
 export interface AgentRequest {
   backend: AgentBackend;
   model?: string;
+  /** Thinking level. Each CLI has its own flag for it. */
+  thinking?: string;
   system: string;
   prompt: string;
   onDelta?: (text: string) => void;
@@ -40,6 +42,7 @@ const ADAPTERS: Record<AgentBackend, Adapter> = {
       '--no-session-persistence',
       '--system-prompt', r.system,
       ...(r.model ? ['--model', r.model] : []),
+      ...(r.thinking ? ['--effort', r.thinking] : []),
     ],
     stdin: (r) => r.prompt,
     parse(e, state) {
@@ -64,6 +67,7 @@ const ADAPTERS: Record<AgentBackend, Adapter> = {
       '--no-prompt-templates',
       '--system-prompt', r.system,
       ...(r.model ? ['--model', r.model] : []),
+      ...(r.thinking ? ['--thinking', r.thinking] : []),
     ],
     stdin: (r) => r.prompt,
     parse(e) {
@@ -82,6 +86,7 @@ const ADAPTERS: Record<AgentBackend, Adapter> = {
       '--sandbox', 'read-only',
       '--ephemeral',
       ...(r.model ? ['-m', r.model] : []),
+      ...(r.thinking ? ['-c', `model_reasoning_effort="${r.thinking}"`] : []),
       '-',
     ],
     // `codex exec` has no system prompt flag.
@@ -103,6 +108,8 @@ export function runAgent(req: AgentRequest): Promise<string> {
   if (!adapter) return Promise.reject(new Error(t('未知的 Agent 后端：{backend}', { backend: req.backend })));
   // A value starting with "-" would be read as a command-line flag.
   if (req.model && !SAFE_MODEL.test(req.model)) return Promise.reject(new Error(t('模型名称无效：{model}', { model: req.model })));
+
+  if (req.thinking && !/^[a-z]+$/.test(req.thinking)) return Promise.reject(new Error(t('思考强度无效：{level}', { level: req.thinking })));
 
   return new Promise((resolve, reject) => {
     const cwd = mkdtempSync(join(tmpdir(), 'p2p-agent-'));

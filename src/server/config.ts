@@ -14,7 +14,7 @@ export function defaultSettings(): Settings {
   return {
     vaultPath: join(homedir(), 'Paper2Podcast'),
     uiLanguage: 'auto',
-    agent: { backend: 'claude', models: { pi: '', claude: '', codex: '' } },
+    agent: { backend: 'claude', models: { pi: '', claude: '', codex: '' }, thinking: { pi: '', claude: '', codex: '' } },
     podcast: {
       language: getLocale(),
       style: 'conversational',
@@ -39,6 +39,7 @@ function merge(base: Settings, patch: SettingsPatch): Settings {
       ...base.agent,
       ...patch.agent,
       models: { ...base.agent.models, ...patch.agent?.models },
+      thinking: { ...base.agent.thinking, ...patch.agent?.thinking },
     },
     podcast: { ...base.podcast, ...patch.podcast },
     blog: { ...base.blog, ...patch.blog },

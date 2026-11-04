@@ -32,7 +32,19 @@ const readJson = (path: string): any => {
   }
 };
 
-const named = (id: string): AgentModel => ({ id, label: id });
+const named = (id: string, efforts: string[]): AgentModel => ({ id, label: id, efforts });
+
+const list = (text: string) => text.split(/[\s,]+/).filter(Boolean);
+
+/** Reads `--effort <level> ... (low, medium, high)` from the Claude Code help text. */
+export function parseClaudeEfforts(help: string): string[] {
+  return list(help.replace(/\s+/g, ' ').match(/--effort <level>[^(]*\(([^)]*)\)/)?.[1] ?? '');
+}
+
+/** Reads `--thinking <level>  Set thinking level: off, low, high` from the pi help text. */
+export function parsePiEfforts(help: string): string[] {
+  return list(help.match(/--thinking <level>[^:\n]*:([^\n]*)/)?.[1] ?? '');
+}
 
 /** Claude Code has no list command. Its help names the current aliases, such as 'opus'. */
 export function parseClaudeModels(help: string): string[] {
@@ -45,17 +57,24 @@ export function parseCodexModels(json: string): AgentModel[] {
   const models = JSON.parse(json).models ?? [];
   return models
     .filter((m: any) => m.slug && m.visibility !== 'hide')
-    .map((m: any): AgentModel => ({ id: m.slug, label: m.display_name || m.slug }));
+    .map(
+      (m: any): AgentModel => ({
+        id: m.slug,
+        label: m.display_name || m.slug,
+        efforts: (m.supported_reasoning_levels ?? []).map((level: any) => level.effort).filter(Boolean),
+        defaultEffort: m.default_reasoning_level,
+      }),
+    );
 }
 
-/** `pi --list-models` prints a table whose first two columns are the provider and the model. */
-export function parsePiModels(table: string): AgentModel[] {
+/** `pi --list-models` prints a table: provider, model, context, max-out, thinking, images. */
+export function parsePiModels(table: string, efforts: string[]): AgentModel[] {
   return table
     .split('\n')
     .slice(1)
     .map((line) => line.trim().split(/\s+/))
     .filter((cols) => cols.length >= 2)
-    .map(([provider, model]) => named(`${provider}/${model}`));
+    .map((cols) => named(`${cols[0]}/${cols[1]}`, cols[4] === 'yes' ? efforts : []));
 }
 
 /** The first top-level `key = "value"` in a TOML file, ignoring anything under a [section]. */
@@ -68,6 +87,8 @@ interface Catalog {
   models: AgentModel[];
   /** The model the CLI uses when none is given, as far as its config says. */
   defaultModel?: string;
+  efforts: string[];
+  defaultEffort?: string;
 }
 
 const CATALOGS: Record<AgentBackend, () => Promise<Catalog>> = {
@@ -77,11 +98,13 @@ const CATALOGS: Record<AgentBackend, () => Promise<Catalog>> = {
     const defaultModel: string | undefined = process.env.ANTHROPIC_MODEL || settings.model;
     const ids = new Set<string>([...parseClaudeModels(out), ...(settings.availableModels ?? [])]);
     if (defaultModel) ids.add(defaultModel);
-    return { models: [...ids].map(named), defaultModel };
+    const efforts = parseClaudeEfforts(out);
+    return { models: [...ids].map((id) => named(id, efforts)), defaultModel, efforts, defaultEffort: settings.effortLevel };
   },
   async codex() {
     const home = process.env.CODEX_HOME || join(homedir(), '.codex');
-    const defaultModel = readTomlString(read(join(home, 'config.toml')) ?? '', 'model');
+    const config = read(join(home, 'config.toml')) ?? '';
+    const defaultModel = readTomlString(config, 'model');
     const { ok, out } = await capture('codex', ['debug', 'models'], 20_000);
     let models: AgentModel[] = [];
     if (ok) {
@@ -91,13 +114,20 @@ const CATALOGS: Record<AgentBackend, () => Promise<Catalog>> = {
         /* An unexpected format just means no list. */
       }
     }
-    return { models, defaultModel };
+    const fallback = models.find((m) => m.id === defaultModel) ?? models[0];
+    return {
+      models,
+      defaultModel,
+      efforts: fallback?.efforts ?? [],
+      defaultEffort: readTomlString(config, 'model_reasoning_effort') ?? fallback?.defaultEffort,
+    };
   },
   async pi() {
     const settings = readJson(join(homedir(), '.pi', 'agent', 'settings.json'));
-    const { ok, out } = await capture('pi', ['--list-models'], 20_000);
+    const [{ ok, out }, help] = await Promise.all([capture('pi', ['--list-models'], 20_000), capture('pi', ['--help'], 15_000)]);
+    const efforts = parsePiEfforts(help.out);
     const defaultModel = settings.defaultProvider && settings.defaultModel ? `${settings.defaultProvider}/${settings.defaultModel}` : undefined;
-    return { models: ok ? parsePiModels(out) : [], defaultModel };
+    return { models: ok ? parsePiModels(out, efforts) : [], defaultModel, efforts, defaultEffort: settings.defaultThinkingLevel };
   },
 };
 
@@ -112,9 +142,9 @@ export function detectAgents(refresh = false): Promise<AgentStatus[]> {
       agents: Promise.all(
         AGENT_BACKENDS.map(async (backend): Promise<AgentStatus> => {
           const { ok, out } = await capture(backend, ['--version'], 8000);
-          if (!ok) return { backend, installed: false, models: [] };
+          if (!ok) return { backend, installed: false, models: [], efforts: [] };
           const version = out.trim().split('\n')[0] || undefined;
-          const catalog = await CATALOGS[backend]().catch((): Catalog => ({ models: [] }));
+          const catalog = await CATALOGS[backend]().catch((): Catalog => ({ models: [], efforts: [] }));
           return { backend, installed: true, version, ...catalog };
         }),
       ),

@@ -108,7 +108,7 @@ function AgentSection({ settings }: { settings: PublicSettings }) {
   const test = async (backend: AgentBackend) => {
     setTests((prev) => ({ ...prev, [backend]: { busy: true } }));
     const res = await api<{ ok: boolean; error?: string; ms: number }>('/agents/test', {
-      body: { backend, model: settings.agent.models[backend] },
+      body: { backend, model: settings.agent.models[backend], thinking: settings.agent.thinking[backend] },
     }).catch((err: Error) => ({ ok: false, error: err.message, ms: 0 }));
     setTests((prev) => ({
       ...prev,
@@ -161,6 +161,20 @@ function AgentSection({ settings }: { settings: PublicSettings }) {
                   }}
                 />
               </div>
+              {(info?.efforts.length ?? 0) > 0 && (
+                <div className="agent-effort" onClick={(e) => e.stopPropagation()}>
+                  <span className="muted small">{t('思考强度')}</span>
+                  <select
+                    className="mono"
+                    aria-label={t('思考强度')}
+                    value={settings.agent.thinking[backend]}
+                    onChange={(e) => save({ agent: { thinking: { ...settings.agent.thinking, [backend]: e.target.value } } })}
+                  >
+                    <option value="">{info?.defaultEffort ? t('默认（{model}）', { model: info.defaultEffort }) : t('默认强度')}</option>
+                    {info?.efforts.map((level) => <option key={level} value={level}>{level}</option>)}
+                  </select>
+                </div>
+              )}
               {result?.text && (
                 <div className={`test-result ${result.ok ? 'ok' : 'bad'}`}>
                   {result.ok ? <Check size={13} /> : <CircleAlert size={13} />}

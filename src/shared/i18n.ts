@@ -5,6 +5,9 @@
  */
 const en = {
   // Chat panel
+  思考强度: 'Thinking level',
+  默认强度: 'Default level',
+  '思考强度无效：{level}': 'Invalid thinking level: {level}',
   模型: 'Model',
   默认模型: 'Default model',
   '默认（{model}）': 'Default ({model})',

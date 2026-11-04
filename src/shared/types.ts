@@ -13,6 +13,8 @@ export interface Settings {
     backend: AgentBackend;
     /** Empty string means the CLI's own default model. */
     models: Record<AgentBackend, string>;
+    /** Empty string means the CLI's own default thinking level. */
+    thinking: Record<AgentBackend, string>;
   };
   podcast: {
     language: string;
@@ -289,6 +291,8 @@ export interface ChatSessionMeta {
   harness: AgentBackend;
   /** Empty means the harness's own default. Can change between messages. */
   model: string;
+  /** Thinking level. Empty means the harness's own default. */
+  thinking: string;
   messageCount: number;
   createdAt: string;
   updatedAt: string;
@@ -325,6 +329,9 @@ export type ServerEvent =
 export interface AgentModel {
   id: string;
   label: string;
+  /** Thinking levels this model accepts. Empty means it can't be adjusted. */
+  efforts: string[];
+  defaultEffort?: string;
 }
 
 export interface AgentStatus {
@@ -334,6 +341,9 @@ export interface AgentStatus {
   /** What the CLI itself reports, not a list kept in this app. */
   models: AgentModel[];
   defaultModel?: string;
+  /** Levels the CLI accepts when no particular model is chosen. */
+  efforts: string[];
+  defaultEffort?: string;
 }
 
 export interface OutputEntry {
