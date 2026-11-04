@@ -196,7 +196,7 @@ export function ChatPanel({
           )}
           {running && (
             <div className="msg ai">
-              {running.text ? <Markdown source={running.text} onCite={onCite} /> : <Thinking label={harness ?? 'AI'} />}
+              {running.text ? <Markdown source={running.text} onCite={onCite} /> : <Thinking text={t('{agent} 正在阅读论文', { agent: harness ?? 'AI' })} />}
             </div>
           )}
         </div>
@@ -204,24 +204,16 @@ export function ChatPanel({
 
       <div className="chat-input">
         {!sessionId && !showHistory && (
-          <div className="harness-picker">
-            <span className="muted small">Harness</span>
-            {!agents && <span className="muted small">{t('检测中')}</span>}
-            {installed?.map((id) => (
-              <button
-                key={id}
-                className={`chip ${draftHarness === id ? 'on' : ''}`}
-                onClick={() => {
-                  setPickedHarness(id);
-                  setDraftModel(null);
-                  setDraftThinking(null);
-                }}
-              >
-                {id}
-              </button>
-            ))}
-            {installed?.length === 0 && <span className="over small">{t('没有检测到本地 Harness，请安装 claude、codex 或 pi。')}</span>}
-          </div>
+          <HarnessPicker
+            installed={installed}
+            detecting={!agents}
+            value={draftHarness}
+            onChange={(id) => {
+              setPickedHarness(id);
+              setDraftModel(null);
+              setDraftThinking(null);
+            }}
+          />
         )}
         {quote && (
           <div className="quote-chip">
@@ -276,13 +268,13 @@ export function ChatPanel({
 }
 
 /** The levels a model accepts. Without a chosen model, those of the harness's default. */
-function effortsOf(agent: AgentStatus | undefined, model: string): string[] {
+export function effortsOf(agent: AgentStatus | undefined, model: string): string[] {
   if (!agent) return [];
   const found = agent.models.find((m) => m.id === (model || agent.defaultModel));
   return found ? found.efforts : agent.efforts;
 }
 
-function EffortSelect({ agent, model, value, onChange }: { agent?: AgentStatus; model: string; value: string; onChange(level: string): void }) {
+export function EffortSelect({ agent, model, value, onChange }: { agent?: AgentStatus; model: string; value: string; onChange(level: string): void }) {
   const efforts = effortsOf(agent, model);
   if (!efforts.length) return null;
   // A level set in the harness's config applies to every model.
@@ -299,7 +291,7 @@ function EffortSelect({ agent, model, value, onChange }: { agent?: AgentStatus; 
 }
 
 /** Lists what the harness reports. A model set elsewhere is kept as an option, even if it isn't listed. */
-function ModelSelect({ agent, value, onChange }: { agent?: AgentStatus; value: string; onChange(model: string): void }) {
+export function ModelSelect({ agent, value, onChange }: { agent?: AgentStatus; value: string; onChange(model: string): void }) {
   const models = agent?.models ?? [];
   return (
     <select className="model-select mono" aria-label={t('模型')} title={t('模型')} value={value} onChange={(e) => onChange(e.target.value)}>
@@ -312,11 +304,37 @@ function ModelSelect({ agent, value, onChange }: { agent?: AgentStatus; value: s
   );
 }
 
-export function Thinking({ label }: { label: string }) {
+export function Thinking({ text }: { text: string }) {
   return (
     <div className="thinking">
       <span className="wave"><i /><i /><i /><i /></span>
-      <span className="muted">{t('{agent} 正在阅读论文', { agent: label })}</span>
+      <span className="muted">{text}</span>
+    </div>
+  );
+}
+
+/** The harness is chosen once, when a chat is created. */
+export function HarnessPicker({
+  installed,
+  detecting,
+  value,
+  onChange,
+}: {
+  installed?: AgentBackend[];
+  detecting: boolean;
+  value?: AgentBackend;
+  onChange(harness: AgentBackend): void;
+}) {
+  return (
+    <div className="harness-picker">
+      <span className="muted small">Harness</span>
+      {detecting && <span className="muted small">{t('检测中')}</span>}
+      {installed?.map((id) => (
+        <button key={id} className={`chip ${value === id ? 'on' : ''}`} onClick={() => onChange(id)}>
+          {id}
+        </button>
+      ))}
+      {installed?.length === 0 && <span className="over small">{t('没有检测到本地 Harness，请安装 claude、codex 或 pi。')}</span>}
     </div>
   );
 }

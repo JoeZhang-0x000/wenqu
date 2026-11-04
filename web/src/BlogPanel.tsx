@@ -83,7 +83,7 @@ export function BlogPanel({
               <Square size={12} fill="currentColor" />{t('停止')}
             </button>
           </div>
-          {running.text ? <Markdown source={running.text} ownerId={paperId} className="article" /> : <Thinking label={agentName} />}
+          {running.text ? <Markdown source={running.text} ownerId={paperId} className="article" /> : <Thinking text={t('{agent} 正在阅读论文', { agent: agentName })} />}
         </div>
       ) : showForm ? (
         <BlogForm
