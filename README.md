@@ -11,9 +11,9 @@ English | [简体中文](README.zh-CN.md)
 ![Node.js 20+](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)
 ![Status: early](https://img.shields.io/badge/status-early-orange.svg)
 
-Papers keep arriving faster than anyone can read them. Before you finish the new one, a newer one is already waiting.
+The number of papers keeps growing, and reading each one closely takes blocks of time that research and engineering also need.
 
-Reading shouldn't have to be carved out of everything else you do. Wenqu turns a paper into a podcast you can play whenever you like, so that when your eyes are busy, your ears can do the reading. On the commute, on a run, over the dishes, fresh water keeps flowing in.
+Wenqu turns papers into podcasts you can listen to at any time, so reading no longer has to happen at a desk. A commute, a workout or a round of chores is enough to get through a paper.
 
 **Wenqu is a lightweight, local, intelligent assistant for your papers.**
 
