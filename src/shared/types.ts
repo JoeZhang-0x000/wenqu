@@ -248,7 +248,22 @@ export interface PaperSummary extends PaperMeta {
   blogCount: number;
   podcastCount: number;
   hasThumb: boolean;
+  /** Changes whenever `thumb.jpg` is rewritten, so that a browser doesn't keep showing the old image. */
+  thumbStamp: number;
+  /** There's no settled cover yet, or it was chosen by older logic. */
+  coverStale: boolean;
 }
+
+/** What `GET /papers/:id/cover` answers: the cover is either settled, or this is what to draw. */
+export type CoverPlan =
+  | { settled: true; thumbStamp: number }
+  | {
+      settled: false;
+      /** File name of a cropped figure, when there is one to use. */
+      figure?: string;
+      /** The page holding the first figure, or page 1 when none was found. */
+      page: number;
+    };
 
 export interface PaperFigure {
   /** The number in the paper's own caption, such as "3" or "3.1". */

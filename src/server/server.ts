@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
 import type { Server } from 'node:http';
 import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,6 +15,7 @@ import {
   type Blog,
   type ChatMessage,
   type CollectionMode,
+  type CoverPlan,
   type PaperFigure,
   type PaperSummary,
   type Podcast,
@@ -27,8 +28,9 @@ import { detectAgents } from './harness.js';
 import { applyUpdate, updateStatus } from './update.js';
 import { importArxiv, lookupArxiv, searchArxiv } from './arxiv.js';
 import { Config, expandHome } from './config.js';
+import { chooseCover, locateFirstFigurePage } from './cover.js';
 import { DoubaoError, synthesizePodcast } from './doubao.js';
-import { FIGURES_VERSION, extractFigures, figurePath, figuresSupported, inlineFigures, keepKnownFigures } from './figures.js';
+import { FIGURES_VERSION, byPosition, extractFigures, figurePath, figuresSupported, inlineFigures, keepKnownFigures } from './figures.js';
 import { Jobs } from './jobs.js';
 import { PDFJS_DIR, pageMarkedText } from './pdf.js';
 import { blogPrompt, chatPrompt, collectionSource, paperSource, parseTagReply, scriptPrompt, tagsPrompt, type SourceFigure } from './prompts.js';
@@ -265,8 +267,10 @@ export function createApp({ config, devOrigin, restart }: AppOptions) {
   api.get('/papers/:id/thumb', (req, res) => sendFile(res, vault.thumbPath(req.params.id), 'image/jpeg'));
   api.put('/papers/:id/thumb', express.raw({ type: () => true, limit: '4mb' }), (req, res) => {
     vault.getPaper(req.params.id);
-    writeFileSync(vault.thumbPath(req.params.id), req.body as Buffer);
-    res.json({ ok: true });
+    const { kind, page } = req.query;
+    if ((kind !== 'figure' && kind !== 'page') || !Number.isInteger(Number(page)) || Number(page) < 1) throw new BadRequest(t('请求无效'));
+    if (!Buffer.isBuffer(req.body) || !req.body.length) throw new BadRequest(t('请求无效'));
+    res.json({ thumbStamp: vault.writeCover(req.params.id, req.body, kind, Number(page)) });
   });
   api.post('/papers/:id/reveal', (req, res) => {
     vault.getPaper(req.params.id);
@@ -330,6 +334,14 @@ export function createApp({ config, devOrigin, restart }: AppOptions) {
 
   // Figures -----------------------------------------------------------------
 
+  /** Migrating a big library shouldn't parse many PDFs at once, on the thread that answers requests. */
+  let heavyQueue: Promise<unknown> = Promise.resolve();
+  const inTurn = <T>(job: () => Promise<T>): Promise<T> => {
+    const result = heavyQueue.then(job, job);
+    heavyQueue = result.catch(() => {});
+    return result;
+  };
+
   /** Two requests for the same paper share one extraction. */
   const extracting = new Map<string, Promise<PaperFigure[]>>();
 
@@ -338,14 +350,14 @@ export function createApp({ config, devOrigin, restart }: AppOptions) {
     if (cached) return Promise.resolve(cached);
     const running = extracting.get(paperId);
     if (running) return running;
-    const work = (async () => {
+    const work = inTurn(async () => {
       if (!(await figuresSupported())) return [];
       const dir = vault.figuresDir(paperId);
       rmSync(dir, { recursive: true, force: true });
       const figures = await extractFigures(new Uint8Array(readFileSync(vault.pdfPath(paperId))), dir);
       vault.writeFigures(paperId, FIGURES_VERSION, figures);
       return figures;
-    })()
+    })
       .catch((err: Error) => {
         // A post without pictures is still a good post.
         console.error(t('图表提取失败 {id}: {error}', { id: paperId, error: err.message }));
@@ -365,11 +377,40 @@ export function createApp({ config, devOrigin, restart }: AppOptions) {
     sendFile(res, join(vault.figuresDir(req.params.id), req.params.file), 'image/png');
   });
   api.patch('/papers/:id/figures/:n', json, async (req, res) => {
-    const figures = (await figuresOf(req.params.id)).map((f) =>
-      f.n === req.params.n ? { ...f, excluded: Boolean(req.body?.excluded) } : f,
-    );
+    const before = await figuresOf(req.params.id);
+    const figures = before.map((f) => (f.n === req.params.n ? { ...f, excluded: Boolean(req.body?.excluded) } : f));
     vault.writeFigures(req.params.id, FIGURES_VERSION, figures);
+    // Removing a figure means its crop is bad, so it can't stay on the cover. Other edits leave the cover alone.
+    const first = (list: PaperFigure[]) => list.filter((f) => !f.excluded).sort(byPosition)[0]?.n;
+    if (first(before) !== first(figures)) vault.invalidateCover(req.params.id);
     res.json(figures);
+  });
+
+  // Covers ------------------------------------------------------------------
+
+  /** The browser draws what this says. Generation waits for an answer, so one tab asks one paper at a time. */
+  api.get('/papers/:id/cover', async (req, res) => {
+    const paperId = req.params.id;
+    const paper = vault.getPaper(paperId);
+    if (!paper.coverStale) {
+      res.json({ settled: true, thumbStamp: paper.thumbStamp } satisfies CoverPlan);
+      return;
+    }
+    // A damaged figures.json only costs this paper its crop.
+    const figures = await Promise.resolve()
+      .then(() => figuresOf(paperId))
+      .catch(() => [] as PaperFigure[]);
+    const choice = await chooseCover(
+      figures,
+      (file) => existsSync(join(vault.figuresDir(paperId), file)),
+      () => inTurn(() => locateFirstFigurePage(new Uint8Array(readFileSync(vault.pdfPath(paperId))))),
+    );
+    res.json({ settled: false, ...choice } satisfies CoverPlan);
+  });
+  api.post('/papers/:id/cover/failed', (req, res) => {
+    vault.getPaper(req.params.id);
+    vault.settleCoverAsFailed(req.params.id);
+    res.json({ ok: true });
   });
 
   /** What generation is based on, for a paper or a collection. */

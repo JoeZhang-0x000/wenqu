@@ -19,10 +19,10 @@ interface Box {
 }
 
 /** Matches a line that starts a caption, but not prose such as "Figure 2 shows". */
-const CAPTION = /^(?:Figure|FIGURE|Fig\.?|FIG\.?|图)\s*(\d{1,3}(?:\.\d{1,3})?)(?:\s*[:：.．|]\s*|\s+(?=[A-Z㐀-鿿]))(.*)$/;
+export const CAPTION = /^(?:Figure|FIGURE|Fig\.?|FIG\.?|图)\s*(\d{1,3}(?:\.\d{1,3})?)(?:\s*[:：.．|]\s*|\s+(?=[A-Z㐀-鿿]))(.*)$/;
 
 /** Groups upright text into lines with page coordinates measured from the top. */
-function layoutLines(items: any[], pageHeight: number): Box[] {
+export function layoutLines(items: any[], pageHeight: number): Box[] {
   const lines: Box[] = [];
   let current: Box | null = null;
   let baseline = 0;
@@ -224,6 +224,12 @@ function trimRegion(
   return { x, y, width: Math.min(x1, maxX + pad) - x, height: Math.min(y1, maxY + pad) - y };
 }
 
+/** Lowest page first, then lowest figure number, so "2" comes before "10". */
+export const byPosition = (a: PaperFigure, b: PaperFigure) => a.page - b.page || a.n.localeCompare(b.n, undefined, { numeric: true });
+
+/** pdf.js can run through a page without returning to the event loop, so requests get a turn here. */
+export const letOthersRun = () => new Promise<void>((resolve) => setImmediate(resolve));
+
 export async function figuresSupported(): Promise<boolean> {
   try {
     await import('@napi-rs/canvas');
@@ -274,9 +280,10 @@ export async function extractFigures(data: Uint8Array, outDir: string): Promise<
         }
       }
       page.cleanup();
+      await letOthersRun();
     }
   } finally {
     await task.destroy();
   }
-  return [...figures.values()].sort((a, b) => a.page - b.page || a.n.localeCompare(b.n, undefined, { numeric: true }));
+  return [...figures.values()].sort(byPosition);
 }

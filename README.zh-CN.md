@@ -171,6 +171,7 @@ Vault 默认位于 `~/Wenqu`。即使不用这个工具，里面的内容也能�
     paper.pdf
     meta.json         标题、作者、标签等，可以手动修改
     text.json         提取的逐页文字
+    thumb.jpg         封面图，cover.json 记录它是怎么选出来的
     chats/<id>.json   每个会话一个文件
     figures/          提取的图表
     blogs/<id>.md     front matter + Markdown，图片用相对路径引用
@@ -224,7 +225,7 @@ flowchart LR
 - **图表：**
   - 只识别 `Figure N:` 这类图注，表格不提取。裁剪不对的可以在博客表单里移除。
   - Agent 看不到图片，只能根据图注挑选和描述。
-  - 图表提取依赖可选的 `@napi-rs/canvas`，平台不支持时博客不带图。
+  - 图表提取依赖可选的 `@napi-rs/canvas`，平台不支持时博客不带图，论文封面也会用第一张图所在的整页，而不是裁剪后的图。
 - **合集：** 只能用 Agent 写稿，也没有问答。
 - **助手：** 只能在 arXiv 上查找和添加论文，不能自己添加本地 PDF；也不了解论文之间的引用关系，“相近”来自关键词搜索。每一步都要重新启动 CLI，所以长对话较慢，也更耗 Agent 额度。
 

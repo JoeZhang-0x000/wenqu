@@ -102,9 +102,22 @@ function guessFront(lines: Line[], infoTitle?: string): Pick<PdfExtract, 'title'
   };
 }
 
+/**
+ * pdf.js builds a `DOMMatrix` while loading, which Node only has through the optional canvas
+ * package. Without that package nothing can render, but text and operators don't need one.
+ */
+export async function loadPdfjs() {
+  if (!globalThis.DOMMatrix) {
+    await import('@napi-rs/canvas').catch(() => {
+      globalThis.DOMMatrix = class {} as unknown as typeof DOMMatrix;
+    });
+  }
+  return import('pdfjs-dist/legacy/build/pdf.mjs');
+}
+
 /** Opens a PDF in Node. Call `task.destroy()` when finished. */
 export async function openPdf(data: Uint8Array) {
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const pdfjs = await loadPdfjs();
   // In Node, pdf.js reads these with `fs`: they must be plain paths, and `file://` URLs silently yield no text.
   const dir = (name: string) => `${join(PDFJS_DIR, name)}/`;
   // Character maps are what make CJK-encoded PDFs extract as text rather than garbage.
