@@ -396,7 +396,9 @@ export class Assistant {
         onDelta: ctx.delta,
         signal: ctx.signal,
       });
-      const { text, calls, error } = parseReply(raw);
+      const { text, calls, error, suggestions } = parseReply(raw);
+      // A reply holding nothing but suggestions has no answer to show them under.
+      if (!text && !calls.length && !error) throw new Error(t('{agent} 没有返回内容。{detail}', { agent: session.harness, detail: '' }));
       const actions = await this.prepareAll(calls, session, error);
       ctx.signal.throwIfAborted();
       this.addMessage(id, {
@@ -404,6 +406,8 @@ export class Assistant {
         // A reply may only repeat what's already waiting, which leaves nothing else to show for it.
         content: text || (actions.length ? '' : t('这些操作还在等你批准。')),
         actions: actions.length ? actions : undefined,
+        // A card still waiting means the turn isn't over, whatever this reply says.
+        suggestions: suggestions.length && !pendingActions(session).length ? suggestions : undefined,
         agent: [session.harness, session.model, session.thinking].filter(Boolean).join(' · '),
         at: new Date().toISOString(),
       });

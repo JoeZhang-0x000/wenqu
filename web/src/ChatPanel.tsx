@@ -1,10 +1,12 @@
 import { ArrowUp, History, MessageSquare, Plus, Square, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { latestSuggestions, visibleAnswer } from '../../src/shared/assistant';
 import { t } from '../../src/shared/i18n';
 import type { AgentBackend, AgentStatus, ChatMessage, ChatSession, ChatSessionMeta, Job } from '../../src/shared/types';
 import { agentsStore, api, bumpLibrary, confirmAction, fail, formatDate, jobsStore, loadAgents, settingsStore, useFetch, useStore } from './lib';
 import { Markdown } from './Markdown';
 import type { SelectionAsk } from './PdfViewer';
+import { MessageChips } from './ui';
 
 const starters = () => [t('一句话总结这篇论文'), t('核心贡献是什么？'), t('方法的关键步骤是什么？'), t('有哪些局限和未解决的问题？')];
 
@@ -46,6 +48,10 @@ export function ChatPanel({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const handledAsk = useRef<number>(0);
   const messages = sessionId && session?.id === sessionId ? session.messages : [];
+  const streamed = running ? visibleAnswer(running.text) : '';
+  /** The reply already answered, until the session catches up with the new message. */
+  const [answered, setAnswered] = useState<string>();
+  const suggestions = latestSuggestions(messages, Boolean(running) || answered === messages.at(-1)?.at);
 
   useEffect(() => {
     void loadAgents();
@@ -61,12 +67,16 @@ export function ChatPanel({
   useEffect(() => {
     const log = logRef.current;
     if (log) log.scrollTop = log.scrollHeight;
-  }, [messages.length, running?.text, showHistory]);
+  }, [messages.length, streamed, showHistory, suggestions.length]);
 
-  const send = async (text: string, selection?: { text: string; page?: number } | null) => {
+  /** A chip sends only its own text, so it leaves what's being typed and any quote in place. */
+  const send = async (text: string, selection?: { text: string; page?: number } | null, fromChip = false) => {
     if (!text.trim() || running) return;
-    setInput('');
-    setQuote(null);
+    if (!fromChip) {
+      setInput('');
+      setQuote(null);
+    }
+    setAnswered(messages.at(-1)?.at);
     setShowHistory(false);
     const body = { message: text, selection: selection?.text, page: selection?.page };
     try {
@@ -78,7 +88,8 @@ export function ChatPanel({
         setSessionId(res.sessionId);
       }
     } catch (err) {
-      setInput(text);
+      if (!fromChip) setInput(text);
+      setAnswered(undefined);
       fail(err);
     }
   };
@@ -170,11 +181,7 @@ export function ChatPanel({
             <div className="chat-empty">
               <p className="serif">{t('读到哪里，问到哪里。')}</p>
               <p className="muted">{t('回答基于全文并标注页码，点击页码可跳转。也可以在左侧选中一段文字直接提问。')}</p>
-              <div className="chips">
-                {starters().map((s) => (
-                  <button className="chip" key={s} onClick={() => send(s)}>{s}</button>
-                ))}
-              </div>
+              <MessageChips items={starters()} onPick={(s) => send(s, null, true)} />
             </div>
           )}
           {messages.map((m, i) =>
@@ -196,9 +203,10 @@ export function ChatPanel({
           )}
           {running && (
             <div className="msg ai">
-              {running.text ? <Markdown source={running.text} onCite={onCite} /> : <Thinking text={t('{agent} 正在阅读论文', { agent: harness ?? 'AI' })} />}
+              {streamed ? <Markdown source={streamed} onCite={onCite} /> : <Thinking text={t('{agent} 正在阅读论文', { agent: harness ?? 'AI' })} />}
             </div>
           )}
+          <MessageChips className="next-steps" label={t('接下来可以问')} items={suggestions} onPick={(s) => send(s, null, true)} />
         </div>
       )}
 

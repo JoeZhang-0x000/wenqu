@@ -4,6 +4,7 @@ import type { Server } from 'node:http';
 import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express, { type NextFunction, type Request, type Response } from 'express';
+import { parseAnswer } from '../shared/assistant.js';
 import { getLocale, setLocale, t } from '../shared/i18n.js';
 import {
   AGENT_BACKENDS,
@@ -766,8 +767,15 @@ export function createApp({ config, devOrigin, restart }: AppOptions) {
       at: new Date().toISOString(),
     };
     vault.appendChat(paperId, sessionId, user);
-    const finish = (content: string, error?: boolean) =>
-      vault.appendChat(paperId, sessionId, { role: 'assistant', content, error, agent: agentLabel(agent), at: new Date().toISOString() });
+    const finish = (content: string, error?: boolean, suggestions?: string[]) =>
+      vault.appendChat(paperId, sessionId, {
+        role: 'assistant',
+        content,
+        error,
+        suggestions: suggestions?.length ? suggestions : undefined,
+        agent: agentLabel(agent),
+        at: new Date().toISOString(),
+      });
     const job = jobs.start(
       { kind: 'chat', paperId, targetId: sessionId, label: t('问答：{title}', { title: user.content.slice(0, 40) }) },
       async ({ signal, delta }) => {
@@ -777,7 +785,10 @@ export function createApp({ config, devOrigin, restart }: AppOptions) {
           onDelta: delta,
           signal,
         });
-        finish(reply);
+        // The prompt quotes the paper, so only the reply itself may be read for suggestions.
+        const { text, suggestions } = parseAnswer(reply);
+        if (!text) throw new Error(t('{agent} 没有返回内容。{detail}', { agent: harness, detail: '' }));
+        finish(text, undefined, suggestions);
       },
       (error, canceled) => finish(canceled ? t('已取消') : error, true),
     );

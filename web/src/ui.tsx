@@ -2,6 +2,18 @@ import type { ReactNode } from 'react';
 import { t, tx } from '../../src/shared/i18n';
 import type { Option } from '../../src/shared/types';
 
+/** Each button sends its text as a message, exactly as if it had been typed. */
+export function MessageChips({ items, label, className, disabled, onPick }: { items: string[]; label?: string; className?: string; disabled?: boolean; onPick(text: string): void }) {
+  if (!items.length) return null;
+  return (
+    <div className={`chips ${className ?? ''}`} role="group" aria-label={label}>
+      {items.map((item) => (
+        <button className="chip" key={item} disabled={disabled} onClick={() => onPick(item)}>{item}</button>
+      ))}
+    </div>
+  );
+}
+
 export function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
   return (
     <label className="field">

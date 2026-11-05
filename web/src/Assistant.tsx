@@ -1,13 +1,13 @@
 import { ArrowUp, Ban, Check, ChevronRight, CircleAlert, Loader2, MessageSquare, Plus, RotateCcw, ShieldQuestion, Square, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { visibleReply } from '../../src/shared/assistant';
+import { latestSuggestions, visibleReply } from '../../src/shared/assistant';
 import { t } from '../../src/shared/i18n';
 import type { AgentBackend, ArxivHit, AssistantAction, AssistantSession, AssistantSessionMeta, Job, PaperSummary } from '../../src/shared/types';
 import { EffortSelect, HarnessPicker, ModelSelect, Thinking, effortsOf } from './ChatPanel';
 import { agentsStore, api, bumpLibrary, confirmAction, fail, formatDate, jobsStore, loadAgents, ownerHref, paperHref, settingsStore, toast, useFetch, useStore } from './lib';
 import { Markdown } from './Markdown';
 import { save as saveSettings } from './Settings';
-import { Select } from './ui';
+import { MessageChips, Select } from './ui';
 
 const href = (id?: string) => (id ? `#/assistant/${id}` : '#/assistant');
 
@@ -85,6 +85,9 @@ function Conversation({ sessionId }: { sessionId?: string }) {
   const streamed = running ? visibleReply(running.text) : '';
   const waiting = messages.flatMap((m) => m.actions ?? []).filter((a) => a.status === 'pending').length;
   const actionCount = messages.flatMap((m) => m.actions ?? []).filter((a) => a.status !== 'running').length;
+  /** The reply already answered, until the session catches up with the new message. */
+  const [answered, setAnswered] = useState<string>();
+  const suggestions = latestSuggestions(messages, Boolean(running) || answered === messages.at(-1)?.at);
 
   useEffect(() => {
     void loadAgents();
@@ -93,11 +96,13 @@ function Conversation({ sessionId }: { sessionId?: string }) {
   useEffect(() => {
     const log = logRef.current;
     if (log) log.scrollTop = log.scrollHeight;
-  }, [messages.length, actionCount, streamed]);
+  }, [messages.length, actionCount, streamed, suggestions.length]);
 
-  const send = async (text: string) => {
+  /** A chip sends only its own text, so it leaves what's being typed in place. */
+  const send = async (text: string, fromChip = false) => {
     if (!text.trim() || running || !harness) return;
-    setInput('');
+    if (!fromChip) setInput('');
+    setAnswered(messages.at(-1)?.at);
     try {
       if (sessionId) {
         await api(`/assistant/sessions/${sessionId}/messages`, { body: { message: text } });
@@ -107,7 +112,8 @@ function Conversation({ sessionId }: { sessionId?: string }) {
         location.hash = href(res.sessionId);
       }
     } catch (err) {
-      setInput(text);
+      if (!fromChip) setInput(text);
+      setAnswered(undefined);
       fail(err);
     }
   };
@@ -136,11 +142,7 @@ function Conversation({ sessionId }: { sessionId?: string }) {
                 {t('助手能查看和整理书架里的所有论文，在 arXiv 上找相近的工作，也能批量生成内容。')}
                 {settings.assistant.autoApproveReads ? t('它改动书架之前会先征得你的同意。') : t('它读取论文全文或改动书架之前会先征得你的同意。')}
               </p>
-              <div className="chips">
-                {starters().map((s) => (
-                  <button className="chip" key={s} disabled={!draftHarness} onClick={() => send(s)}>{s}</button>
-                ))}
-              </div>
+              <MessageChips items={starters()} disabled={!draftHarness} onPick={(s) => send(s, true)} />
             </div>
           )}
           {messages.map((m, i) =>
@@ -163,6 +165,7 @@ function Conversation({ sessionId }: { sessionId?: string }) {
               )}
             </div>
           )}
+          <MessageChips className="next-steps" label={t('接下来可以问')} items={suggestions} onPick={(s) => send(s, true)} />
         </div>
       </div>
 
