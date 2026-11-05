@@ -59,3 +59,26 @@ describe('settings from the earlier project name', () => {
     expect(new Config().get().vaultPath).toBe(join(home, 'Wenqu'));
   });
 });
+
+describe('font size', () => {
+  const saved = process.env.WENQU_CONFIG_DIR;
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'wenqu-config-'));
+    process.env.WENQU_CONFIG_DIR = dir;
+  });
+  afterEach(() => {
+    if (saved === undefined) delete process.env.WENQU_CONFIG_DIR;
+    else process.env.WENQU_CONFIG_DIR = saved;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('defaults to medium, is kept, and rejects unknown sizes', () => {
+    const config = new Config(dir);
+    expect(config.get().fontSize).toBe('medium');
+    config.update({ fontSize: 'large' });
+    expect(new Config(dir).get().fontSize).toBe('large');
+    expect(() => config.update({ fontSize: 'huge' as never })).toThrow();
+  });
+});

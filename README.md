@@ -150,7 +150,7 @@ wenqu add paper.pdf https://arxiv.org/abs/1706.03762 2005.14165
 
 ## Configuration
 
-Settings are stored in `~/.config/wenqu/config.json` (mode 600). You will normally change them in the settings panel. Command-line messages follow your terminal's language (`LANG`) unless you have chosen an interface language in Settings.
+Settings are stored in `~/.config/wenqu/config.json` (mode 600). You will normally change them in the settings panel. Text size is under **Settings → General**, and doesn't affect the PDF, which has its own zoom. Command-line messages follow your terminal's language (`LANG`) unless you have chosen an interface language in Settings.
 
 | Environment variable | Purpose |
 |---|---|

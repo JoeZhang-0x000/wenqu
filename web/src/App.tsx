@@ -1,7 +1,7 @@
 import { Loader2, Moon, Settings as SettingsIcon, Sun, X } from 'lucide-react';
 import { t } from '../../src/shared/i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AssistantSessionMeta, UpdateStatus } from '../../src/shared/types';
+import type { AssistantSessionMeta, FontSize, UpdateStatus } from '../../src/shared/types';
 import { Assistant } from './Assistant';
 import { api, confirmStore, connectEvents, fail, jobsStore, localeStore, refreshSettings, routeStore, settingsStore, toastStore, useFetch, useStore } from './lib';
 import { CollectionView, Collections } from './Collections';
@@ -11,6 +11,8 @@ import { Player } from './Player';
 import { Reader } from './Reader';
 import { SettingsDialog } from './Settings';
 import { Works } from './Works';
+
+const FONT_SCALE: Record<FontSize, string> = { small: '87.5%', medium: '100%', large: '112.5%', xlarge: '125%' };
 
 export function App() {
   const route = useStore(routeStore);
@@ -61,6 +63,11 @@ export function App() {
       window.removeEventListener('drop', drop);
     };
   }, []);
+
+  // Every font size in the stylesheet is in rem, so this scales the text. The PDF has its own zoom.
+  useEffect(() => {
+    if (settings) document.documentElement.style.fontSize = FONT_SCALE[settings.fontSize];
+  }, [settings?.fontSize]);
 
   if (loadError) return <div className="fatal">{t('无法连接本地服务：{error}', { error: loadError })}</div>;
   if (!settings) return null;
