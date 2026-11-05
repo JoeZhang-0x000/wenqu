@@ -24,7 +24,7 @@ There are more papers than time to read them, and a PDF is no use on your commut
 - 🖼️ **Blog posts with the paper's figures.** Captioned figures are cropped automatically, and the agent picks which ones to use. Exported Markdown embeds its images, so one file is all you need to publish.
 - 📚 **Multi-paper collections.** Pick a few papers and make a weekly digest or a mini literature review. Citations show which paper and page each claim came from.
 - 🧭 **An assistant for the whole library.** Ask it to find related papers on arXiv, tidy up your library, or generate podcasts in a batch. It asks for your approval before it acts.
-- 🔌 **Bring your own agent.** Start a chat with Claude Code, Codex or pi, whichever is on your machine, using its existing login. Pick from the models it reports and set how hard it thinks.
+- 🔌 **Bring your own agent.** Start a chat with Claude Code, Codex, pi or DeepSeek Harness, whichever is on your machine, using its existing login. Pick from the models it reports and set how hard it thinks.
 - 🌐 **English and Chinese.** The interface follows your browser's language, or you can set it in Settings. Generated content can be in English, Chinese or Japanese.
 - 🔒 **Local-first.** The server listens only on your machine, and agents run with restricted permissions to reduce the risk from malicious instructions hidden in a paper. See [Security](#security).
 
@@ -33,7 +33,7 @@ There are more papers than time to read them, and a PDF is no use on your commut
 **You will need:**
 
 - Node.js 20 or later
-- At least one agent CLI: [Claude Code](https://www.anthropic.com/claude-code), [Codex](https://github.com/openai/codex) or [pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) (for questions, blog posts and scripts)
+- At least one agent CLI: [Claude Code](https://www.anthropic.com/claude-code), [Codex](https://github.com/openai/codex), [pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) or DeepSeek Harness (for questions, blog posts and scripts)
 - An API key for [Doubao Speech](https://docs.volcengine.com/docs/doubao-voice/podcast-api-websocket-v3protocol?lang=zh) (only for synthesizing audio)
 
 **Install and run:**
@@ -76,7 +76,7 @@ Conversations are kept per paper. Open the history to return to an earlier one o
 | Model | Any time | `codex debug models`, `pi --list-models`, and the aliases in `claude --help` |
 | Thinking level | Any time | The CLI's help or model list, per model where it reports them |
 
-Claude Code has no command for listing models, so only the aliases named in its help appear, along with anything in your settings' `model` and `availableModels`.
+Claude Code has no command for listing models, so only the aliases named in its help appear, along with anything in your settings' `model` and `availableModels`. DeepSeek Harness has no such command either, so its models are a fixed list, and you can type another. If `dsh` isn't on your `PATH`, the CLI inside the macOS app is used. Its headless mode doesn't see a key saved in the app, so set `DEEPSEEK_API_KEY` in the environment you start Wenqu from.
 
 The agent settings choose what blog posts and podcast scripts use, and the defaults for new chats.
 
@@ -187,7 +187,7 @@ The project was first called Paper2Podcast. Settings in `~/.config/paper2podcast
 flowchart LR
     A[PDF / arXiv] --> B[pdf.js extracts text and figures]
     B --> V[(Local vault)]
-    V --> C[Agent CLI<br/>Claude Code / Codex / pi]
+    V --> C[Agent CLI<br/>Claude Code / Codex / pi / dsh]
     C --> D[Questions]
     C --> E[Blog posts]
     C --> F[Podcast script]
@@ -202,7 +202,7 @@ Paper content is sent to the agent service you choose. When generating audio, th
 ## Security
 
 - **Local only.** The server listens on `127.0.0.1` and rejects requests from other Hosts and Origins, so malicious websites can't reach it through your browser.
-- **Papers are untrusted data.** A PDF may contain prompt injection, so agents run in an empty temporary directory. Claude Code and pi have all tools disabled, and Codex uses a read-only sandbox. Codex has no option to disable tools completely, so it can still read local files, but it can't write to them and has no network access by default.
+- **Papers are untrusted data.** A PDF may contain prompt injection, so agents run in an empty temporary directory. Claude Code, pi and DeepSeek Harness have all tools disabled, and Codex uses a read-only sandbox. Codex has no option to disable tools completely, so it can still read local files, but it can't write to them and has no network access by default.
 - **The assistant can only ask.** Its agent has no tools either. It writes down what it wants to do, and the server checks the request, describes it to you from the app's own data, and runs only what you approve. A paper with hidden instructions can at most put a request in front of you, so read the card before approving. Your library's details go to the agent service without asking. Searching arXiv doesn't ask first either, so a query could carry a little text from something the assistant has read; every query is shown in the chat, and it can only go to arXiv.
 - **Output is sanitized.** Agent output passes through DOMPurify before rendering, and only the app's own images load, which stops content from leaking through remote image URLs.
 - **Imports are restricted.** arXiv import only downloads from `arxiv.org`, and never fetches arbitrary URLs.

@@ -23,7 +23,7 @@
 - 🖼️ **博客自带论文图表。** 自动裁出带图注的图表，由 Agent 挑选插入。导出的 Markdown 内嵌图片，一个文件就能发布。
 - 📚 **多篇合集。** 选几篇论文，做成一期「本周论文」或一篇小型综述。引用会标明出自哪篇的哪一页。
 - 🧭 **管理整个书架的助手。** 让它在 arXiv 上找相近的论文、整理书架，或者批量生成播客。动手之前都会先征得你的同意。
-- 🔌 **用你已有的 Agent。** 新建问答时从本机已安装的 Claude Code、Codex 和 pi 中选择，直接使用它们各自的登录状态。模型列表由它们自己提供，思考强度也可以调。
+- 🔌 **用你已有的 Agent。** 新建问答时从本机已安装的 Claude Code、Codex、pi 和 DeepSeek Harness 中选择，直接使用它们各自的登录状态。模型列表由它们自己提供，思考强度也可以调。
 - 🌐 **中英双语。** 界面默认跟随浏览器语言，也可以在设置里指定。生成的内容可以是中文、英文或日文。
 - 🔒 **本地优先。** 服务只监听本机，Agent 在受限权限下运行，以降低论文里恶意指令的风险。详见[安全](#安全)。
 
@@ -32,7 +32,7 @@
 **你需要：**
 
 - Node.js 20 或更高版本
-- 至少一个 Agent CLI：[Claude Code](https://www.anthropic.com/claude-code)、[Codex](https://github.com/openai/codex) 或 [pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)（问答、写博客、写脚本时需要）
+- 至少一个 Agent CLI：[Claude Code](https://www.anthropic.com/claude-code)、[Codex](https://github.com/openai/codex)、[pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) 或 DeepSeek Harness（问答、写博客、写脚本时需要）
 - [豆包语音](https://docs.volcengine.com/docs/doubao-voice/podcast-api-websocket-v3protocol?lang=zh)的 API Key（只有合成音频时需要）
 
 **安装并启动：**
@@ -75,7 +75,7 @@ PDF 由 pdf.js 渲染，支持搜索、缩放和夜读。数学公式用 KaTeX �
 | 模型 | 随时 | `codex debug models`、`pi --list-models` 和 `claude --help` 里的别名 |
 | 思考强度 | 随时 | CLI 的帮助或模型列表，能按模型区分的就按模型区分 |
 
-Claude Code 没有列出模型的命令，所以只显示帮助里提到的别名，以及设置中 `model` 和 `availableModels` 的内容。
+Claude Code 没有列出模型的命令，所以只显示帮助里提到的别名，以及设置中 `model` 和 `availableModels` 的内容。DeepSeek Harness 同样没有这个命令，所以它的模型是固定列表，也可以手动输入其他模型。如果 `PATH` 上没有 `dsh`，会使用 macOS 应用内的 CLI。它的 headless 模式读不到保存在应用里的 key，所以需要在启动问渠的环境里设置 `DEEPSEEK_API_KEY`。
 
 Agent 设置决定博客和播客脚本用什么，也是新建问答的默认值。
 
@@ -186,7 +186,7 @@ API Key 不在 Vault 中，所以同步或分享 Vault 不会泄露 Key。
 flowchart LR
     A[PDF / arXiv] --> B[pdf.js 提取文字和图表]
     B --> V[(本地 Vault)]
-    V --> C[Agent CLI<br/>Claude Code / Codex / pi]
+    V --> C[Agent CLI<br/>Claude Code / Codex / pi / dsh]
     C --> D[问答]
     C --> E[博客]
     C --> F[播客脚本]
@@ -201,7 +201,7 @@ flowchart LR
 ## 安全
 
 - **只面向本机。** 服务只监听 `127.0.0.1`，并拒绝来自其他 Host 或 Origin 的请求，恶意网页无法借助你的浏览器访问它。
-- **论文是不可信数据。** PDF 里可能藏着提示注入，所以 Agent 在空的临时目录中运行：Claude Code 和 pi 禁用所有工具，Codex 使用只读沙箱。Codex 没有完全禁用工具的选项，它仍可读取本机文件，但不能写入，默认也不能联网。
+- **论文是不可信数据。** PDF 里可能藏着提示注入，所以 Agent 在空的临时目录中运行：Claude Code、pi 和 DeepSeek Harness 禁用所有工具，Codex 使用只读沙箱。Codex 没有完全禁用工具的选项，它仍可读取本机文件，但不能写入，默认也不能联网。
 - **助手只能提出请求。** 它的 Agent 同样没有任何工具，只能写下想做的事；服务端会检查请求，用应用自己的数据向你说明，并且只执行你批准的操作。藏有恶意指令的论文最多只能把一个请求摆到你面前，所以批准前请看清卡片。书架的书目信息会直接发送给 Agent 服务，不会询问。搜索 arXiv 也不需要批准，因此查询词可能带上助手读过的少量文字；每次查询都会显示在聊天里，而且只会发给 arXiv。
 - **输出经过清理。** Agent 的输出在渲染前会经过 DOMPurify 处理，并且只加载应用自己的图片，防止内容通过远程图片地址被发送出去。
 - **导入范围受限。** arXiv 导入只从 `arxiv.org` 下载，不会抓取任意网址。

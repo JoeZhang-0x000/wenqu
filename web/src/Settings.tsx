@@ -114,9 +114,9 @@ function GeneralSection({ settings }: { settings: PublicSettings }) {
   );
 }
 
-const AGENT_NAMES: Record<AgentBackend, string> = { claude: 'Claude Code', codex: 'Codex', pi: 'pi' };
+const AGENT_NAMES: Record<AgentBackend, string> = { claude: 'Claude Code', codex: 'Codex', pi: 'pi', dsh: 'DeepSeek Harness' };
 const agentPlaceholder = (backend: AgentBackend) =>
-  ({ claude: t('留空使用默认，如 sonnet'), codex: t('留空使用默认'), pi: t('留空使用 pi 的默认模型') })[backend];
+  ({ claude: t('留空使用默认，如 sonnet'), codex: t('留空使用默认'), pi: t('留空使用 pi 的默认模型'), dsh: t('留空使用默认') })[backend];
 
 function AgentSection({ settings }: { settings: PublicSettings }) {
   const status = useStore(agentsStore);
@@ -142,7 +142,7 @@ function AgentSection({ settings }: { settings: PublicSettings }) {
   return (
     <section>
       <h3 className="serif">{t('Agent 后端')}</h3>
-      <p className="muted">{t('这里的选择用于生成博客和播客脚本，也是新建问答时的默认值。Agent 使用它们自己的登录状态。论文内容被当作不可信数据：Claude 和 pi 运行时禁用所有工具，Codex 运行在只读沙箱中。')}</p>
+      <p className="muted">{t('这里的选择用于生成博客和播客脚本，也是新建问答时的默认值。Agent 使用它们自己的登录状态。论文内容被当作不可信数据：Claude、pi 和 DeepSeek Harness 运行时禁用所有工具，Codex 运行在只读沙箱中。')}</p>
       <div className="agents">
         {AGENT_BACKENDS.map((backend) => {
           const info = status?.find((s) => s.backend === backend);
