@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { agentCommand } from './agents.js';
 import { AGENT_BACKENDS, type AgentBackend, type AgentModel, type AgentStatus } from '../shared/types.js';
 
 function capture(command: string, args: string[], timeoutMs: number): Promise<{ ok: boolean; out: string }> {
@@ -77,6 +78,11 @@ export function parsePiModels(table: string, efforts: string[]): AgentModel[] {
     .map((cols) => named(`${cols[0]}/${cols[1]}`, cols[4] === 'yes' ? efforts : []));
 }
 
+/** dsh has no list command. It prints its configuration, which names the default model. */
+export function parseDshDefaultModel(config: string): string | undefined {
+  return config.match(/id: agent-default-model\n[\s\S]*?\n\s+model: (\S+)/)?.[1];
+}
+
 /** The first top-level `key = "value"` in a TOML file, ignoring anything under a [section]. */
 export function readTomlString(toml: string, key: string): string | undefined {
   const top = toml.split(/^\s*\[/m)[0];
@@ -129,6 +135,11 @@ const CATALOGS: Record<AgentBackend, () => Promise<Catalog>> = {
     const defaultModel = settings.defaultProvider && settings.defaultModel ? `${settings.defaultProvider}/${settings.defaultModel}` : undefined;
     return { models: ok ? parsePiModels(out, efforts) : [], defaultModel, efforts, defaultEffort: settings.defaultThinkingLevel };
   },
+  async dsh() {
+    const { out } = await capture(agentCommand('dsh'), ['--profile', 'headless', '--dump-config'], 15_000);
+    const efforts = ['off', 'high', 'max'];
+    return { models: ['deepseek-v4-flash', 'deepseek-v4-pro'].map((id) => named(id, efforts)), defaultModel: parseDshDefaultModel(out), efforts };
+  },
 };
 
 const DETECT_TTL_MS = 5 * 60_000;
@@ -141,7 +152,7 @@ export function detectAgents(refresh = false): Promise<AgentStatus[]> {
       at: Date.now(),
       agents: Promise.all(
         AGENT_BACKENDS.map(async (backend): Promise<AgentStatus> => {
-          const { ok, out } = await capture(backend, ['--version'], 8000);
+          const { ok, out } = await capture(agentCommand(backend), ['--version'], 8000);
           if (!ok) return { backend, installed: false, models: [], efforts: [] };
           const version = out.trim().split('\n')[0] || undefined;
           const catalog = await CATALOGS[backend]().catch((): Catalog => ({ models: [], efforts: [] }));

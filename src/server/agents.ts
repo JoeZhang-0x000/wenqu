@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { t } from '../shared/i18n.js';
 import type { AgentBackend } from '../shared/types.js';
 
@@ -19,9 +19,44 @@ export interface AgentRequest {
 interface Adapter {
   /** Command-line arguments. The prompt always goes through stdin. */
   args(req: AgentRequest): string[];
+  /** Writes any files the arguments refer to into the working directory. */
+  setup?(req: AgentRequest, cwd: string): void;
   stdin(req: AgentRequest): string;
   /** Handles one JSON line and returns visible text, or throws on a fatal agent error. */
   parse(event: any, state: { final?: string }): string | undefined;
+}
+
+const DSH_APP_CLI = '/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh';
+
+/** The desktop app doesn't put its CLI on PATH, so it's found inside the app when nothing else is. */
+export function agentCommand(backend: AgentBackend): string {
+  if (backend !== 'dsh') return backend;
+  const onPath = (process.env.PATH ?? '').split(delimiter).some((dir) => dir && existsSync(join(dir, 'dsh')));
+  return !onPath && existsSync(DSH_APP_CLI) ? DSH_APP_CLI : 'dsh';
+}
+
+/** dsh has no flags for this, so these rows of its plugin list are switched off by a patch file. */
+const DSH_DISABLED = [
+  'tool-plugin-manager', 'tool-working-directory', 'tool-bash', 'tool-pwsh', 'tool-jobs', 'tool-fs', 'tool-fs-search',
+  'tool-skill', 'tool-subagent-control', 'tool-subagent-list-agents', 'tool-subagent', 'tool-subagent-fork',
+  'tool-workflow', 'tool-todo', 'tool-goal', 'tool-web', 'plan-mode',
+  // Reads AGENTS.md files, and spends a model call on naming the session.
+  'agent-instructions', 'session-title-llm',
+];
+const DSH_DEFAULT_MODEL = 'deepseek-flash';
+
+/** JSON is valid YAML, and quoting every value keeps a model name from being read as a YAML tag. */
+export function dshPatch(req: Pick<AgentRequest, 'model' | 'thinking'>, cwd: string): string {
+  const rows: unknown[] = [
+    ...DSH_DISABLED.map((id) => ({ id, disabled: true })),
+    { id: 'tools', config: { mode: 'native' } },
+    { id: 'session-persistence-jsonl', config: { root: join(cwd, 'sessions') } },
+  ];
+  if (req.model || req.thinking) {
+    const selection = { provider: 'deepseek-official', model: req.model || DSH_DEFAULT_MODEL, ...(req.thinking ? { reasoningEffort: req.thinking } : {}) };
+    rows.push({ id: 'agent-default-model', config: selection });
+  }
+  return rows.map((row) => `- ${JSON.stringify(row)}`).join('\n') + '\n';
 }
 
 /**
@@ -99,6 +134,17 @@ const ADAPTERS: Record<AgentBackend, Adapter> = {
       return undefined;
     },
   },
+  dsh: {
+    args: () => ['--profile', 'headless', '--patch', 'wenqu.yml', '--json', '-'],
+    setup: (r, cwd) => writeFileSync(join(cwd, 'wenqu.yml'), dshPatch(r, cwd)),
+    // A system prompt in dsh's config is a template that fails on any `{{`, so it goes in with the prompt.
+    stdin: (r) => `${r.system}\n\n---\n\n${r.prompt}`,
+    parse(e) {
+      if (e.type === 'text') return e.text;
+      if (e.type === 'status' && e.reason?.kind === 'error') throw new Error(e.reason.error?.message || t('{agent} 返回错误', { agent: 'dsh' }));
+      return undefined;
+    },
+  },
 };
 
 const SAFE_MODEL = /^[\w.:@/][\w.:@/-]*$/;
@@ -113,7 +159,8 @@ export function runAgent(req: AgentRequest): Promise<string> {
 
   return new Promise((resolve, reject) => {
     const cwd = mkdtempSync(join(tmpdir(), 'wenqu-agent-'));
-    const child = spawn(req.backend, adapter.args(req), { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+    adapter.setup?.(req, cwd);
+    const child = spawn(agentCommand(req.backend), adapter.args(req), { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
     let text = '';
     let stderr = '';
     let buffer = '';

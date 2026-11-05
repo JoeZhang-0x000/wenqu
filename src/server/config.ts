@@ -30,7 +30,7 @@ export function defaultSettings(): Settings {
   return {
     vaultPath: defaultVaultPath(),
     uiLanguage: 'auto',
-    agent: { backend: 'claude', models: { pi: '', claude: '', codex: '' }, thinking: { pi: '', claude: '', codex: '' } },
+    agent: { backend: 'claude', models: { pi: '', claude: '', codex: '', dsh: '' }, thinking: { pi: '', claude: '', codex: '', dsh: '' } },
     podcast: {
       language: getLocale(),
       style: 'conversational',

@@ -334,7 +334,7 @@ export function HarnessPicker({
           {id}
         </button>
       ))}
-      {installed?.length === 0 && <span className="over small">{t('没有检测到本地 Harness，请安装 claude、codex 或 pi。')}</span>}
+      {installed?.length === 0 && <span className="over small">{t('没有检测到本地 Harness，请安装 claude、codex、pi 或 dsh。')}</span>}
     </div>
   );
 }

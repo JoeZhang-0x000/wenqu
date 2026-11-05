@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { parseClaudeEfforts, parseClaudeModels, parseCodexModels, parsePiEfforts, parsePiModels, readTomlString } from '../src/server/harness';
+import { parseClaudeEfforts, parseClaudeModels, parseCodexModels, parseDshDefaultModel, parsePiEfforts, parsePiModels, readTomlString } from '../src/server/harness';
+import { dshPatch } from '../src/server/agents';
 
 describe('reading model lists', () => {
   it('finds the aliases in the wrapped Claude Code help text', () => {
@@ -58,9 +59,31 @@ kimi       k3             1.0M     131.1K   no        yes
     expect(parsePiEfforts('nothing here')).toEqual([]);
   });
 
+  it('reads the default model from the dsh config dump', () => {
+    const config = "- id: jobs\n  name: x\n- id: agent-default-model\n  name: y\n  config:\n    provider: deepseek-official\n    model: deepseek-flash\n- id: z\n";
+    expect(parseDshDefaultModel(config)).toBe('deepseek-flash');
+    expect(parseDshDefaultModel('')).toBeUndefined();
+  });
+
   it('reads top-level TOML values, not ones under a section', () => {
     const toml = 'approval = "x"\nmodel = "gpt-a"\n\n[profiles.fast]\nmodel = "gpt-b"\n';
     expect(readTomlString(toml, 'model')).toBe('gpt-a');
     expect(readTomlString('[a]\nmodel = "b"\n', 'model')).toBeUndefined();
+  });
+});
+
+describe('the dsh patch', () => {
+  const rows = (patch: string) => patch.trim().split('\n').map((line) => JSON.parse(line.slice(2)));
+
+  it('switches tools off and keeps sessions in the working directory', () => {
+    const list = rows(dshPatch({}, '/tmp/x'));
+    expect(list).toContainEqual({ id: 'tool-bash', disabled: true });
+    expect(list).toContainEqual({ id: 'session-persistence-jsonl', config: { root: '/tmp/x/sessions' } });
+    expect(list.some((row) => row.id === 'agent-default-model')).toBe(false);
+  });
+
+  it('sets the model and thinking level together', () => {
+    const row = rows(dshPatch({ thinking: 'max' }, '/tmp/x')).find((r) => r.id === 'agent-default-model');
+    expect(row.config).toEqual({ provider: 'deepseek-official', model: 'deepseek-flash', reasoningEffort: 'max' });
   });
 });

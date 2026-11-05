@@ -1,5 +1,5 @@
-export type AgentBackend = 'pi' | 'claude' | 'codex';
-export const AGENT_BACKENDS: AgentBackend[] = ['claude', 'codex', 'pi'];
+export type AgentBackend = 'pi' | 'claude' | 'codex' | 'dsh';
+export const AGENT_BACKENDS: AgentBackend[] = ['claude', 'codex', 'pi', 'dsh'];
 
 export type PodcastEngine = 'agent' | 'doubao';
 export type PodcastLength = 'short' | 'medium' | 'long';
