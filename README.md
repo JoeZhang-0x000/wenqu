@@ -7,26 +7,47 @@ English | [简体中文](README.zh-CN.md)
 > *How can the water run so clear? Because fresh water keeps flowing from its source.*
 > — Zhu Xi, “Reflections on Reading”
 
-**Turn research papers into podcasts you can listen to, and go back to the source.**
+**A research tool for papers that runs on your own computer.**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Node.js 20+](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)
 ![Status: early](https://img.shields.io/badge/status-early-orange.svg)
 
-There are more papers than time to read them, and a PDF is no use on your commute. Wenqu is a paper workbench that runs on your own computer. Drop in a PDF or an arXiv link, ask AI questions as you read, then generate a two-host podcast and an illustrated blog post. Everything is stored as plain files in your vault. There is no account to create, and the tool has no cloud service of its own.
+Drop in a PDF or an arXiv link, then work the way you would at a desk. Question the paper with the page open next to the answer, send an assistant to arXiv for the related work, and turn what you've read into a podcast for the commute. Wenqu drives the agent CLI already on your machine (Claude Code, Codex, pi or DeepSeek Harness) and keeps every paper, chat and episode as plain files in a folder you own. There is no account to create, and the tool has no cloud service of its own.
 
-![An episode playing in the main area with a synced transcript, chat in the sidebar, and a timeline colored by host at the bottom](docs/images/podcast-player.png)
+![A 30-second tour: opening a paper from the library, clicking a page citation in an answer to jump to that page, selecting a passage, playing a podcast episode, and the assistant answering a research question](docs/images/tour.gif)
 
-## Highlights
+*Recorded on a library in real use, not on sample data, which is why some of the content is in Chinese.*
 
-- 🎙️ **Papers become podcasts.** An agent writes a script in the language, style and length you choose. You can edit it turn by turn, then send it to Doubao for speech synthesis. The transcript follows along during playback, and clicking any line jumps to it.
-- 💬 **Ask as you read.** Select a passage in the PDF to ask about it, explain it or translate it. Answers draw on the full text and cite page numbers, and clicking a citation takes you to that page. Each paper keeps its own chat history.
-- 🖼️ **Blog posts with the paper's figures.** Captioned figures are cropped automatically, and the agent picks which ones to use. Exported Markdown embeds its images, so one file is all you need to publish.
-- 📚 **Multi-paper collections.** Pick a few papers and make a weekly digest or a mini literature review. Citations show which paper and page each claim came from.
-- 🧭 **An assistant for the whole library.** Ask it to find related papers on arXiv, tidy up your library, or generate podcasts in a batch. It asks for your approval before it acts.
-- 🔌 **Bring your own agent.** Start a chat with Claude Code, Codex, pi or DeepSeek Harness, whichever is on your machine, using its existing login. Pick from the models it reports and set how hard it thinks.
-- 🌐 **English and Chinese.** The interface follows your browser's language, or you can set it in Settings. Generated content can be in English, Chinese or Japanese.
-- 🔒 **Local-first.** The server listens only on your machine, and agents run with restricted permissions to reduce the risk from malicious instructions hidden in a paper. See [Security](#security).
+## What it does
+
+### Read: ask where you're stuck
+
+![A paper with its abstract selected and a menu offering Ask, Explain and Translate, next to an answer that cites page numbers](docs/images/reader.png)
+
+Select a passage in the PDF and choose **Ask**, **Explain** or **Translate**. Answers draw on the full text and cite page numbers, and clicking a citation turns the PDF to that page. Each paper keeps its own chat history. If the paper links a GitHub repository, the chat can also read the code at a fixed commit and compare it with what the paper says.
+
+### Research: one assistant for the whole library and arXiv
+
+![The assistant reading a paper from the library, searching arXiv three times, then answering with a formula and a link to another paper in the library](docs/images/assistant.png)
+
+Chat stays with one paper, and the assistant sees all of them. The question behind this screenshot was which KV-cache techniques stop working on hybrid-attention models, and why. The assistant searched the shelf, read the papers that mattered, searched arXiv for what was missing, and answered with links back to the papers. The next message was “add the ones you mentioned to the library, then make a podcast for each”, so it added the missing papers and wrote a podcast script for each of the eight.
+
+Every change to your library waits for your approval on a card first. So does reading a paper's full text, until you allow it.
+
+### Listen: papers become podcasts and posts
+
+![A podcast episode playing, with the current line highlighted in the transcript and a timeline colored by host at the bottom](docs/images/podcast.png)
+
+An agent writes a two-host script in the language, style and length you choose. Edit it turn by turn, then send it to Doubao for speech synthesis. The transcript follows playback, and clicking any line jumps to it. The same paper can become a blog post with its figures cropped in, and a few papers together can become a weekly digest or a mini literature review.
+
+### Also
+
+- **Bring your own agent.** Start a chat with Claude Code, Codex, pi or DeepSeek Harness, whichever is on your machine, using its existing login. Pick from the models it reports and set how hard it thinks.
+- **Tags.** Add them by hand or let an agent suggest them, then filter the shelf.
+- **Background work.** Blog posts, scripts, audio and the assistant run in the background, and the browser can tell you when they finish.
+- **English and Chinese.** The interface follows your browser's language, or you can set it in Settings. Generated content can be in English, Chinese or Japanese.
+- **Local-first.** The server listens only on your machine, and agents run with restricted permissions to reduce the risk from malicious instructions hidden in a paper. What leaves your computer is what goes to the agent service you chose and, when you synthesize audio, to Doubao. See [How it works](#how-it-works) and [Security](#security).
 
 ## Quick start
 
@@ -56,7 +77,7 @@ Your browser opens automatically. Then:
 
 To use the `wenqu` command from any directory, also run `npm link`.
 
-## Features
+## In detail
 
 ### Workspace
 
@@ -66,13 +87,9 @@ PDFs are rendered by pdf.js, with search, zoom and a night mode. Math is display
 
 ### Chat
 
-![After selecting text in the PDF, a menu offers to ask, explain or translate, next to an answer with page citations](docs/images/ask-ai.png)
-
 Conversations are kept per paper. Open the history to return to an earlier one or delete it. An existing single conversation from an earlier version becomes a session automatically.
 
 After an answer, the agent can offer a few follow-up questions as buttons under it. Clicking one sends it as your next message. They come from the same reply, so they cost no extra model call.
-
-![A floating chat panel over the paper, starting a new chat with a choice of harness, model and thinking level](docs/images/chat-float.png)
 
 | | When you can change it | Where the options come from |
 |---|---|---|
@@ -94,8 +111,6 @@ The chat can read a GitHub repository linked to the paper, and compare what the 
 
 ### Podcasts
 
-![The script editor: edit each turn, switch hosts, and adjust speech rate and intro music](docs/images/script-editor.png)
-
 | | Agent script | Doubao direct |
 |---|---|---|
 | Script comes from | Your local agent | Doubao's summary of the paper |
@@ -109,12 +124,16 @@ There are five built-in styles: casual chat, deep dive, debate, beginner-friendl
 
 There are five built-in styles: in-depth explainer, popular science, engineer's view, critical review and short social post. You can also describe your own, and keep editing after generation.
 
+Captioned figures are cropped from the paper automatically, and the agent picks which ones to use. Exported Markdown embeds its images, so one file is all you need to publish.
+
 ### Collections
 
 In the library, click **Make collection**, select 2 to 12 papers, then choose a format:
 
 - **Weekly digest:** covers the papers one at a time, as a single episode or post.
 - **Mini review:** organizes by theme and compares methods and evidence across papers.
+
+Citations show which paper and page each claim came from.
 
 ### Tags
 
