@@ -27,7 +27,7 @@ const sections = (): { id: Section; label: string }[] => [
   { id: 'vault', label: 'Vault' },
 ];
 
-async function save(patch: SettingsPatch) {
+export async function save(patch: SettingsPatch) {
   try {
     applySettings(await api<PublicSettings>('/settings', { method: 'PUT', body: patch }));
   } catch (err) {
@@ -81,9 +81,9 @@ function AssistantSection({ settings }: { settings: PublicSettings }) {
       <Switch
         checked={settings.assistant.autoApproveReads}
         onChange={(autoApproveReads) => save({ assistant: { autoApproveReads } })}
-        label={t('查询书架时不用询问')}
+        label={t('读取论文全文时不用询问')}
       />
-      <p className="field-hint">{t('打开后，助手可以直接读取书架和论文全文。这些内容会发送给你选择的 Agent 服务。')}</p>
+      <p className="field-hint">{t('标题、作者和摘要始终可以直接查看。打开后，助手也可以直接读取论文全文。这些内容都会发送给你选择的 Agent 服务。')}</p>
     </section>
   );
 }

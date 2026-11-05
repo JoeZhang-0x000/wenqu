@@ -83,7 +83,7 @@ describe('Assistant', () => {
     return sessionId;
   };
   const approveAll = async (id: string) => {
-    assistant.decide(id, actionsOf(id).filter((a) => a.status === 'pending').map((a) => a.id));
+    assistant.decide(id, { approve: actionsOf(id).filter((a) => a.status === 'pending').map((a) => a.id) });
     await idle(id);
   };
 
@@ -141,41 +141,51 @@ describe('Assistant', () => {
   afterEach(() => rmSync(root, { recursive: true, force: true }));
 
   describe('approval', () => {
-    it('asks before reading the library, and the agent gets nothing until then', async () => {
-      say(`Let me look.${block({ tool: 'list_papers' })}`);
+    it('asks before reading inside a paper, and the agent gets nothing until then', async () => {
+      say(`Let me look.${block({ tool: 'read_paper', args: { paper: paperId, from_page: 1, to_page: 1 } })}`);
       const id = await start();
       const [action] = actionsOf(id);
-      expect(action).toMatchObject({ tool: 'list_papers', status: 'pending', access: 'read' });
+      expect(action).toMatchObject({ tool: 'read_paper', status: 'pending', access: 'read' });
       expect(action.result).toBeUndefined();
       expect(requests).toHaveLength(1);
       expect(assistant.list()[0].pending).toBe(1);
 
-      say('You have one paper.');
+      say('Read it.');
       await approveAll(id);
       expect(actionsOf(id)[0].status).toBe('done');
-      expect(requests[1].prompt).toContain('Cascade Pruning Networks');
-      expect(lastMessage(id).content).toBe('You have one paper.');
+      expect(requests[1].prompt).toContain('[p.1]');
+      expect(lastMessage(id).content).toBe('Read it.');
       expect(assistant.list()[0].pending).toBe(0);
     });
 
-    it('stops asking about reads once allowed in that chat, but only that chat', async () => {
-      say(block({ tool: 'list_papers' }), 'Done.');
+    it('looks at the library without asking, but not inside it', async () => {
+      say(
+        block({ tool: 'list_papers' }, { tool: 'get_paper', args: { paper: paperId } }, { tool: 'list_collections' }, { tool: 'search_paper_text', args: { query: '182 ms' } }),
+      );
       const id = await start();
-      assistant.decide(id, [actionsOf(id)[0].id], true);
+      expect(actionsOf(id).map((a) => a.status)).toEqual(['done', 'done', 'done', 'pending']);
+      expect(actionsOf(id)[3].result).toBeUndefined();
+    });
+
+    it('stops asking about reads once allowed in that chat, but only that chat', async () => {
+      const read = block({ tool: 'read_paper', args: { paper: paperId, from_page: 1, to_page: 1 } });
+      say(read, 'Done.');
+      const id = await start();
+      assistant.decide(id, { approve: [actionsOf(id)[0].id], allowReads: true });
       await idle(id);
-      say(block({ tool: 'list_papers' }), 'Done.');
+      say(read, 'Done.');
       assistant.send(id, 'again');
       await idle(id);
       expect(actionsOf(id).map((a) => a.status)).toEqual(['done', 'done']);
 
-      script = [block({ tool: 'list_papers' })];
+      script = [read];
       const other = await start();
       expect(actionsOf(other)[0].status).toBe('pending');
     });
 
     it('can skip asking about reads through settings', async () => {
       settings.assistant.autoApproveReads = true;
-      say(block({ tool: 'list_papers' }), 'Done.');
+      say(block({ tool: 'read_paper', args: { paper: paperId } }), 'Done.');
       const id = await start();
       expect(actionsOf(id)[0].status).toBe('done');
     });
@@ -211,7 +221,7 @@ describe('Assistant', () => {
     it('rejecting everything changes nothing and does not call the agent again', async () => {
       say(block({ tool: 'delete_paper', args: { paper: paperId } }));
       const id = await start();
-      expect(assistant.decide(id, [])).toEqual({ job: null });
+      expect(assistant.decide(id, { reject: [actionsOf(id)[0].id] })).toEqual({ job: null });
       await idle(id);
       expect(vault.getPaper(paperId)).toBeTruthy();
       expect(actionsOf(id)[0].status).toBe('rejected');
@@ -227,30 +237,163 @@ describe('Assistant', () => {
         'Done.',
       );
       const id = await start();
-      const [update] = actionsOf(id);
-      assistant.decide(id, [update.id]);
+      const [update, remove] = actionsOf(id);
+      assistant.decide(id, { approve: [update.id], reject: [remove.id] });
       await idle(id);
       expect(vault.getPaper(paperId).year).toBe(1999);
       expect(actionsOf(id).map((a) => a.status)).toEqual(['done', 'rejected']);
       expect(requests[1].prompt).toContain('status="rejected"');
     });
 
-    it('treats a new message as a no', async () => {
-      say(block({ tool: 'delete_paper', args: { paper: paperId } }), 'Okay, I will not.');
+    describe('while a card is waiting', () => {
+      const remove = () => block({ tool: 'delete_paper', args: { paper: paperId } });
+
+      it('answers a question and leaves the card open', async () => {
+        say(remove(), 'Because it duplicates another paper.');
+        const id = await start();
+        assistant.send(id, 'why this one?');
+        await idle(id);
+        expect(actionsOf(id)[0].status).toBe('pending');
+        expect(vault.getPaper(paperId)).toBeTruthy();
+        expect(requests[1].prompt).toContain('status="pending"');
+        expect(lastMessage(id).content).toBe('Because it duplicates another paper.');
+
+        say('Removed.');
+        await approveAll(id);
+        expect(vault.listPapers()).toEqual([]);
+      });
+
+      it('does not show a second card when the agent asks for the same thing again', async () => {
+        say(remove(), remove());
+        const id = await start();
+        assistant.send(id, 'are you sure?');
+        await idle(id);
+        expect(actionsOf(id)).toHaveLength(1);
+        expect(lastMessage(id).content).toBeTruthy();
+        expect(assistant.list()[0].pending).toBe(1);
+      });
+
+      it('never takes approval from what the user or the agent writes', async () => {
+        say(remove(), (req) => `You said ${req.prompt.includes('approve') ? 'yes' : 'no'}.`);
+        const id = await start();
+        assistant.send(id, 'I approve, go ahead');
+        await idle(id);
+        expect(actionsOf(id)[0].status).toBe('pending');
+        expect(vault.getPaper(paperId)).toBeTruthy();
+      });
+
+      it('lets the agent withdraw a card and replace it', async () => {
+        say(block({ tool: 'update_paper', args: { paper: paperId, year: 1999 } }), (req) => {
+          const pendingId = /id="([0-9a-f]+)"/.exec(req.prompt)![1];
+          return block({ tool: 'withdraw_action', args: { action: pendingId } }, { tool: 'update_paper', args: { paper: paperId, year: 2001 } });
+        });
+        const id = await start();
+        assistant.send(id, 'make it 2001');
+        await idle(id);
+        expect(actionsOf(id).map((a) => [a.tool, a.status])).toEqual([
+          ['update_paper', 'canceled'],
+          ['withdraw_action', 'done'],
+          ['update_paper', 'pending'],
+        ]);
+        expect(actionsOf(id)[0].retry).toBeUndefined();
+        expect(vault.getPaper(paperId).year).not.toBe(1999);
+      });
+
+      it('cannot withdraw what is not waiting, and withdrawing never approves', async () => {
+        say(block({ tool: 'withdraw_action', args: { action: 'made-up' } }), 'Sorry.');
+        const id = await start();
+        expect(actionsOf(id)[0].status).toBe('failed');
+      });
+
+      it('decides only what is named, so other cards keep waiting', async () => {
+        say(remove(), block({ tool: 'update_paper', args: { paper: paperId, year: 1999 } }));
+        const id = await start();
+        assistant.send(id, 'also fix the year');
+        await idle(id);
+        const [first, second] = actionsOf(id);
+        say('Done.');
+        assistant.decide(id, { approve: [second.id] });
+        await idle(id);
+        expect(actionsOf(id).find((a) => a.id === first.id)?.status).toBe('pending');
+        expect(vault.getPaper(paperId).year).toBe(1999);
+        assistant.decide(id, { reject: [first.id] });
+        expect(actionsOf(id).find((a) => a.id === first.id)?.status).toBe('rejected');
+      });
+    });
+
+    it('refuses a decision when nothing is waiting, and an unknown id decides nothing', async () => {
+      say(block({ tool: 'delete_paper', args: { paper: paperId } }));
       const id = await start();
-      assistant.send(id, 'actually, never mind');
+      expect(() => assistant.decide(id, { approve: ['made-up'] })).toThrow();
+      expect(() => assistant.decide(id, {})).toThrow();
+      expect(actionsOf(id)[0].status).toBe('pending');
+      expect(vault.getPaper(paperId)).toBeTruthy();
+    });
+
+    it('rejects when an id is both approved and rejected', async () => {
+      say(block({ tool: 'delete_paper', args: { paper: paperId } }));
+      const id = await start();
+      const [action] = actionsOf(id);
+      assistant.decide(id, { approve: [action.id], reject: [action.id] });
       await idle(id);
       expect(actionsOf(id)[0].status).toBe('rejected');
       expect(vault.getPaper(paperId)).toBeTruthy();
     });
 
-    it('refuses a decision when nothing is waiting, and an unknown id approves nothing', async () => {
-      say(block({ tool: 'delete_paper', args: { paper: paperId } }));
-      const id = await start();
-      assistant.decide(id, ['made-up']);
-      await idle(id);
-      expect(vault.getPaper(paperId)).toBeTruthy();
-      expect(() => assistant.decide(id, [])).toThrow();
+    describe('changing a card', () => {
+      it('runs what the user chose instead of what the agent asked for', async () => {
+        say(block({ tool: 'generate_podcast', args: { paper: paperId, style: 'brief', language: 'zh' } }), 'Done.');
+        const id = await start();
+        const [action] = actionsOf(id);
+        const session = assistant.editAction(id, action.id, { language: 'en', length: 'long' });
+        const edited = session.messages.flatMap((m) => m.actions ?? [])[0];
+        expect(edited.args).toMatchObject({ language: 'en', length: 'long', style: 'brief' });
+        expect(edited.options?.find((o) => o.key === 'language')?.value).toBe('en');
+        await approveAll(id);
+        expect(deps.startPodcast).toHaveBeenCalledWith(paperId, expect.objectContaining({ language: 'en', length: 'long', style: 'brief' }));
+        expect(requests[1].prompt).toContain('\\"language\\":\\"en\\"');
+      });
+
+      it.each([
+        ['a value that is not offered', { language: 'klingon' }],
+        ['a key that is not offered', { synthesize: true }],
+        ['the paper itself', { paper: 'other' }],
+        ['an object key', { __proto__: 'x', constructor: 'x' }],
+      ])('refuses %s and changes nothing', async (_name, changes) => {
+        say(block({ tool: 'generate_blog', args: { paper: paperId } }));
+        const id = await start();
+        const [before] = actionsOf(id);
+        expect(() => assistant.editAction(id, before.id, JSON.parse(JSON.stringify(changes)))).toThrow();
+        expect(actionsOf(id)[0].args).toEqual(before.args);
+      });
+
+      it('offers nothing to change where nothing can be', async () => {
+        say(block({ tool: 'delete_paper', args: { paper: paperId } }));
+        const id = await start();
+        const [action] = actionsOf(id);
+        expect(action.options).toBeUndefined();
+        expect(() => assistant.editAction(id, action.id, { paper: 'other' })).toThrow();
+      });
+
+      it('cannot change an action once it is decided', async () => {
+        say(block({ tool: 'generate_blog', args: { paper: paperId, language: 'zh' } }));
+        const id = await start();
+        const [action] = actionsOf(id);
+        assistant.decide(id, { reject: [action.id] });
+        expect(() => assistant.editAction(id, action.id, { language: 'en' })).toThrow();
+      });
+
+      it('keeps a custom style selectable, along with the text settled for it', async () => {
+        settings.podcast.style = 'custom';
+        settings.podcast.customStyle = 'As a sea shanty';
+        say(block({ tool: 'generate_podcast', args: { paper: paperId } }));
+        const id = await start();
+        const [action] = actionsOf(id);
+        expect(action.options?.find((o) => o.key === 'style')?.value).toBe('custom');
+        settings.podcast.customStyle = 'Changed later';
+        const session = assistant.editAction(id, action.id, { language: 'en' });
+        expect(session.messages.flatMap((m) => m.actions ?? [])[0].args.customStyle).toBe('As a sea shanty');
+      });
     });
 
     it('describes actions itself, whatever the agent claims and however it words the arguments', async () => {
@@ -274,13 +417,24 @@ describe('Assistant', () => {
   describe('library tools', () => {
     it('finds papers by their details and by their full text, with the page', async () => {
       settings.assistant.autoApproveReads = true;
-      say(block({ tool: 'list_papers', args: { query: 'cascade' } }, { tool: 'list_papers', args: { query: '182 ms' } }, { tool: 'list_papers', args: { query: 'nothing-like-this' } }), 'Done.');
+      say(
+        block(
+          { tool: 'list_papers', args: { query: 'cascade' } },
+          { tool: 'list_papers', args: { query: '182 ms' } },
+          { tool: 'search_paper_text', args: { query: 'cascade' } },
+          { tool: 'search_paper_text', args: { query: '182 ms' } },
+          { tool: 'search_paper_text', args: { query: 'nothing-like-this' } },
+        ),
+        'Done.',
+      );
       const id = await start();
       const results = actionsOf(id).map((a) => JSON.parse(a.result!));
-      expect(results[0].papers[0].match).toBeUndefined();
-      expect(results[1].papers[0].match).toMatchObject({ snippet: expect.stringContaining('182 ms') });
-      expect(results[1].papers[0].match.page).toBeGreaterThan(0);
-      expect(results[2].total).toBe(0);
+      expect(results[0].total).toBe(1);
+      expect(results[1].total).toBe(0);
+      expect(results[2].papers[0].match).toBeUndefined();
+      expect(results[3].papers[0].match).toMatchObject({ snippet: expect.stringContaining('182 ms') });
+      expect(results[3].papers[0].match.page).toBeGreaterThan(0);
+      expect(results[4].total).toBe(0);
     });
 
     it('reads page ranges and clamps them to the paper', async () => {
@@ -336,18 +490,13 @@ describe('Assistant', () => {
       expect(requests[1].prompt).not.toContain(paperId);
     });
 
-    it('does not reveal what is in the library through a search until reads are allowed', async () => {
+    it('says which search results are already in the library', async () => {
       const mine = (await vault.importPdf(zh, 'x.pdf', { arxivId: '2401.00001v1' })).meta.id;
       vi.mocked(deps.searchArxiv).mockResolvedValue([{ arxivId: '2401.00001v1', title: 'Mine', authors: [], paperId: mine }]);
       say(block({ tool: 'search_arxiv', args: { query: 'x' } }), 'Done.');
       const id = await start();
-      expect(requests[1].prompt).not.toContain(mine);
+      expect(requests[1].prompt).toContain(mine);
       expect(actionsOf(id)[0].hits?.[0].paperId).toBe(mine);
-
-      settings.assistant.autoApproveReads = true;
-      say(block({ tool: 'search_arxiv', args: { query: 'x' } }), 'Done.');
-      await start();
-      expect(requests[3].prompt).toContain(mine);
     });
 
     it('keeps search results current with the library', async () => {
@@ -376,9 +525,10 @@ describe('Assistant', () => {
     });
 
     it('asks only once when a reply repeats itself', async () => {
-      say(block({ tool: 'list_papers' }, { tool: 'list_papers' }, { tool: 'list_papers', args: { query: 'x' } }));
+      const year = (value: number) => ({ tool: 'update_paper', args: { paper: paperId, year: value } });
+      say(block(year(1999), year(1999), year(2001)));
       const id = await start();
-      expect(actionsOf(id).map((a) => a.args)).toEqual([{}, { query: 'x' }]);
+      expect(actionsOf(id).map((a) => a.args.year)).toEqual([1999, 2001]);
     });
 
     it('caps how many actions one reply can ask for', async () => {
@@ -469,8 +619,8 @@ describe('Assistant', () => {
     it('does not generate for a paper whose import was rejected or failed', async () => {
       say(block({ tool: 'add_arxiv', args: { input: '2401.00001' } }, { tool: 'generate_podcast', args: { paper: '2401.00001' } }), 'The second failed.');
       const id = await start();
-      const [, generate] = actionsOf(id);
-      assistant.decide(id, [generate.id]);
+      const [add, generate] = actionsOf(id);
+      assistant.decide(id, { approve: [generate.id], reject: [add.id] });
       await idle(id);
       expect(actionsOf(id).map((a) => a.status)).toEqual(['rejected', 'failed']);
       expect(deps.startPodcast).not.toHaveBeenCalled();
@@ -537,6 +687,111 @@ describe('Assistant', () => {
     });
   });
 
+  describe('retrying', () => {
+    it('runs a failed action again as approved, without calling the agent', async () => {
+      vi.mocked(deps.importArxiv).mockRejectedValueOnce(new Error('offline'));
+      say(block({ tool: 'add_arxiv', args: { input: '2401.00001' } }), 'It failed.');
+      const id = await start();
+      await approveAll(id);
+      const [action] = actionsOf(id);
+      expect(action).toMatchObject({ status: 'failed', retry: 'ready' });
+      const calls = requests.length;
+
+      assistant.retry(id, [action.id]);
+      await idle(id);
+      expect(actionsOf(id)[0]).toMatchObject({ status: 'done' });
+      expect(actionsOf(id)[0].retry).toBeUndefined();
+      expect(actionsOf(id)[0].note).toBeUndefined();
+      expect(vault.findArxiv('2401.00001')).toBeTruthy();
+      expect(requests).toHaveLength(calls);
+
+      say('Good.');
+      assistant.send(id, 'did it work?');
+      await idle(id);
+      expect(requests.at(-1)!.prompt).toContain('status="done"');
+    });
+
+    it('can fail again and still be retried', async () => {
+      vi.mocked(deps.importArxiv).mockRejectedValueOnce(new Error('offline')).mockRejectedValueOnce(new Error('still offline'));
+      say(block({ tool: 'add_arxiv', args: { input: '2401.00001' } }), 'It failed.');
+      const id = await start();
+      await approveAll(id);
+      assistant.retry(id, [actionsOf(id)[0].id]);
+      await idle(id);
+      expect(actionsOf(id)[0]).toMatchObject({ status: 'failed', result: 'still offline', retry: 'ready' });
+    });
+
+    it('never offers to retry a request that never reached the user', async () => {
+      say(block({ tool: 'delete_paper', args: { paper: 'no-such-paper' } }, { tool: 'format_disk' }), 'Sorry.');
+      const id = await start();
+      const actions = actionsOf(id);
+      expect(actions.every((a) => a.status === 'failed' && !a.retry)).toBe(true);
+      expect(() => assistant.retry(id, actions.map((a) => a.id))).toThrow();
+    });
+
+    it('cannot retry something rejected, waiting or done', async () => {
+      say(block({ tool: 'delete_paper', args: { paper: paperId } }, { tool: 'update_paper', args: { paper: paperId, year: 1999 } }));
+      const id = await start();
+      const [remove, update] = actionsOf(id);
+      expect(() => assistant.retry(id, [remove.id])).toThrow();
+      assistant.decide(id, { reject: [remove.id, update.id] });
+      expect(() => assistant.retry(id, [remove.id, update.id])).toThrow();
+      expect(vault.getPaper(paperId)).toBeTruthy();
+    });
+
+    it('says when an interrupted action may already have taken effect, and only runs it when asked', async () => {
+      say(block({ tool: 'update_paper', args: { paper: paperId, year: 1999 } }, { tool: 'update_paper', args: { paper: paperId, year: 2001 } }));
+      const id = await start();
+      const stored = vault.getAssistantSession(id);
+      const [running, queued] = stored.messages.at(-1)!.actions!;
+      running.status = 'running';
+      queued.status = 'approved';
+      vault.saveAssistantSession(stored);
+      expect(actionsOf(id).map((a) => a.retry)).toEqual(['unsure', 'ready']);
+      expect(vault.getPaper(paperId).year).not.toBe(1999);
+
+      assistant.retry(id, [actionsOf(id)[1].id]);
+      await idle(id);
+      expect(vault.getPaper(paperId).year).toBe(2001);
+      expect(actionsOf(id)[0].status).toBe('failed');
+    });
+
+    it('can pick up a batch that was stopped, including what never started', async () => {
+      let child: Job | undefined;
+      vi.mocked(deps.startPodcast).mockImplementationOnce((ownerId: string) => {
+        const podcastId = 'slow';
+        child = jobs.start({ kind: 'script', paperId: ownerId, targetId: podcastId, label: 'x' }, ({ signal }) =>
+          new Promise((_, reject) => signal.addEventListener('abort', () => reject(new Error('stopped')))),
+        );
+        return { job: child, podcastId };
+      });
+      say(block({ tool: 'generate_podcast', args: { paper: paperId } }, { tool: 'update_paper', args: { paper: paperId, year: 1999 } }));
+      const id = await start();
+      const { job } = assistant.decide(id, { approve: actionsOf(id).map((a) => a.id) });
+      await vi.waitFor(() => expect(child).toBeTruthy());
+      jobs.cancel(job!.id);
+      await idle(id);
+      expect(actionsOf(id).map((a) => a.retry)).toEqual(['unsure', 'ready']);
+
+      assistant.retry(id, [actionsOf(id)[1].id]);
+      await idle(id);
+      expect(vault.getPaper(paperId).year).toBe(1999);
+    });
+
+    it('refuses to retry while the chat is busy', async () => {
+      let release!: (text: string) => void;
+      vi.mocked(deps.importArxiv).mockRejectedValueOnce(new Error('offline'));
+      say(block({ tool: 'add_arxiv', args: { input: '2401.00001' } }), 'It failed.', () => new Promise<string>((resolve) => (release = resolve)));
+      const id = await start();
+      await approveAll(id);
+      assistant.send(id, 'hello');
+      await vi.waitFor(() => expect(release).toBeTruthy());
+      expect(() => assistant.retry(id, [actionsOf(id)[0].id])).toThrow();
+      release('Hi.');
+      await idle(id);
+    });
+  });
+
   describe('stopping', () => {
     it('stops a running batch and the generation under it, and records what was cut off', async () => {
       let child: Job | undefined;
@@ -549,7 +804,7 @@ describe('Assistant', () => {
       });
       say(block({ tool: 'generate_podcast', args: { paper: paperId } }, { tool: 'update_paper', args: { paper: paperId, year: 1999 } }));
       const id = await start();
-      const { job } = assistant.decide(id, actionsOf(id).map((a) => a.id));
+      const { job } = assistant.decide(id, { approve: actionsOf(id).map((a) => a.id) });
       await vi.waitFor(() => expect(child).toBeTruthy());
       jobs.cancel(job!.id);
       await idle(id);
@@ -595,7 +850,7 @@ describe('Assistant', () => {
       });
       say(block({ tool: 'generate_podcast', args: { paper: paperId } }, { tool: 'generate_podcast', args: { paper: second } }));
       const id = await start();
-      const { job } = assistant.decide(id, actionsOf(id).map((a) => a.id));
+      const { job } = assistant.decide(id, { approve: actionsOf(id).map((a) => a.id) });
       await vi.waitFor(() => expect(deps.startPodcast).toHaveBeenCalledTimes(2));
       jobs.cancel(job!.id);
       await idle(id);
@@ -628,7 +883,7 @@ describe('Assistant', () => {
       vault.saveAssistantSession(stored);
       expect(actionsOf(id)[0].status).toBe('failed');
       expect(vault.getPaper(paperId)).toBeTruthy();
-      expect(() => assistant.decide(id, [actionsOf(id)[0].id])).toThrow();
+      expect(() => assistant.decide(id, { approve: [actionsOf(id)[0].id] })).toThrow();
     });
 
     it('stops after too many steps rather than looping', async () => {

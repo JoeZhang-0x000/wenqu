@@ -17,14 +17,16 @@ export function Select({
   options,
   onChange,
   custom,
+  disabled,
 }: {
   value: string;
   options: Option[];
   onChange(value: string): void;
   custom?: boolean;
+  disabled?: boolean;
 }) {
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)}>
+    <select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
       {options.map((o) => (
         <option key={o.id} value={o.id}>
           {tx(o.label)}

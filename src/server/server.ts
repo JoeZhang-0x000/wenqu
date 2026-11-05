@@ -785,11 +785,19 @@ export function createApp({ config, devOrigin }: AppOptions) {
   api.post('/assistant/sessions/:id/messages', json, (req, res) => {
     res.json(assistant.send(req.params.id, String(req.body?.message ?? '')));
   });
-  /** Whatever isn't listed in `approve` is rejected, so a request can't approve anything by omission. */
+  const idList = (value: unknown): string[] => {
+    if (value !== undefined && !Array.isArray(value)) throw new BadRequest(t('请求无效'));
+    return (value ?? []).map(String);
+  };
   api.post('/assistant/sessions/:id/decide', json, (req, res) => {
-    const { approve, allowReads } = req.body ?? {};
-    if (!Array.isArray(approve)) throw new BadRequest(t('请求无效'));
-    res.json(assistant.decide(req.params.id, approve.map(String), allowReads === true));
+    const { approve, reject, allowReads } = req.body ?? {};
+    res.json(assistant.decide(req.params.id, { approve: idList(approve), reject: idList(reject), allowReads: allowReads === true }));
+  });
+  api.post('/assistant/sessions/:id/retry', json, (req, res) => {
+    res.json(assistant.retry(req.params.id, idList(req.body?.actions)));
+  });
+  api.patch('/assistant/sessions/:id/actions/:actionId', json, (req, res) => {
+    res.json(assistant.editAction(req.params.id, req.params.actionId, req.body ?? {}));
   });
   api.patch('/assistant/sessions/:id', json, (req, res) => {
     const { model, thinking } = req.body ?? {};

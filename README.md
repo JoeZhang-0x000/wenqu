@@ -112,13 +112,14 @@ Open **Assistant** in the top bar. Unlike chat, which stays with one paper, the 
 - "Which papers don't have a podcast yet? Write a short script for each."
 - "The authors on this paper are wrong. They should be…"
 
-Nothing happens to your library without you. Each request shows up as a card written by the app, not by the agent, listing exactly what will happen, including the old and new values of an edit. A batch needs one approval, and you can untick any part of it.
+Nothing happens to your library without you. Each request shows up as a card written by the app, not by the agent, listing exactly what will happen, including the old and new values of an edit. A batch needs one approval, and you can untick any part of it. You can also change a generation's style, language and length right on the card. Cards stay open while you keep talking, so you can ask about one before deciding. If an approved action fails or is interrupted, **Retry** runs it again as approved.
 
 | Action | Approval |
 |---|---|
 | Add, edit or delete a paper; create a collection | Always |
 | Generate a podcast or blog post; synthesize audio | Always |
-| Read your library or a paper's text | By default. You can allow it for one chat, or turn this off under **Settings → Assistant** |
+| Read or search a paper's full text | By default. You can allow it for one chat or always, and change that under **Settings → Assistant** |
+| See titles, authors, abstracts, collections and what's been generated | Not needed |
 | Search arXiv | Not needed, because it changes nothing |
 
 Results from an arXiv search can also be added with their own **Add** button. The assistant can add papers from arXiv only, so use **Add paper** for local PDFs. To stop a batch, press stop in the chat, which also stops any generation it started.
@@ -191,7 +192,7 @@ Paper content is sent to the agent service you choose. When generating audio, th
 
 - **Local only.** The server listens on `127.0.0.1` and rejects requests from other Hosts and Origins, so malicious websites can't reach it through your browser.
 - **Papers are untrusted data.** A PDF may contain prompt injection, so agents run in an empty temporary directory. Claude Code and pi have all tools disabled, and Codex uses a read-only sandbox. Codex has no option to disable tools completely, so it can still read local files, but it can't write to them and has no network access by default.
-- **The assistant can only ask.** Its agent has no tools either. It writes down what it wants to do, and the server checks the request, describes it to you from the app's own data, and runs only what you approve. A paper with hidden instructions can at most put a request in front of you, so read the card before approving. Searching arXiv doesn't ask first, so a query could carry a little text from something the assistant has read; every query is shown in the chat, and it can only go to arXiv.
+- **The assistant can only ask.** Its agent has no tools either. It writes down what it wants to do, and the server checks the request, describes it to you from the app's own data, and runs only what you approve. A paper with hidden instructions can at most put a request in front of you, so read the card before approving. Your library's details go to the agent service without asking. Searching arXiv doesn't ask first either, so a query could carry a little text from something the assistant has read; every query is shown in the chat, and it can only go to arXiv.
 - **Output is sanitized.** Agent output passes through DOMPurify before rendering, and only the app's own images load, which stops content from leaking through remote image URLs.
 - **Imports are restricted.** arXiv import only downloads from `arxiv.org`, and never fetches arbitrary URLs.
 

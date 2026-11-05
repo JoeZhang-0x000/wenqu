@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { ASSISTANT_OWNER, parseReply } from '../shared/assistant.js';
-import { t, tx } from '../shared/i18n.js';
+import { t } from '../shared/i18n.js';
 import {
   BLOG_STYLES,
   LANGUAGES,
@@ -16,6 +16,7 @@ import {
   type AssistantSession,
   type AssistantSessionMeta,
   type Job,
+  type Option,
   type PaperSummary,
   type Settings,
 } from '../shared/types.js';
@@ -55,6 +56,7 @@ interface Prepared {
   args: Args;
   summary: string;
   details?: AssistantAction['details'];
+  options?: AssistantAction['options'];
 }
 
 interface Outcome {
@@ -69,6 +71,8 @@ interface PrepareContext {
   incoming: Map<string, { id: string; title: string }>;
   /** Looked up together, because arXiv's pacing would make one call per paper slow. */
   lookups: Map<string, ArxivLookup>;
+  /** What is already waiting for the user in this chat. */
+  pending: AssistantAction[];
 }
 
 interface Tool {
@@ -120,15 +124,17 @@ function choiceArg(args: Args, key: string, choices: string[]): string | undefin
 /** Keeps what was given, so defaults keep following the user's settings until an action runs. */
 const defined = (values: Args): Args => Object.fromEntries(Object.entries(values).filter(([, v]) => v !== undefined));
 
-/** What's in the library is only mentioned once the agent may read it, because searching doesn't ask first. */
-const describeHit = (hit: ArxivHit, canReadLibrary: boolean) => ({
+const describeHit = (hit: ArxivHit) => ({
   arxivId: hit.arxivId,
   title: hit.title,
   authors: hit.authors.slice(0, 6),
   year: hit.year,
   abstract: hit.abstract ? clip(hit.abstract, 600) : undefined,
-  inLibraryAs: canReadLibrary ? hit.paperId : undefined,
+  inLibraryAs: hit.paperId,
 });
+
+const wordsOf = (query: string) => query.toLowerCase().split(/\s+/).filter(Boolean);
+const detailsOf = (p: PaperSummary) => `${p.title} ${p.authors.join(' ')} ${p.abstract ?? ''}`.toLowerCase();
 
 const describePaper = (p: PaperSummary) => ({
   id: p.id,
@@ -190,7 +196,13 @@ export class Assistant {
       actions: m.actions?.map((a) => {
         if (a.status !== 'running' && a.status !== 'approved') return a;
         changed = true;
-        return { ...a, status: 'failed' as const, result: 'Interrupted before it finished. It may or may not have taken effect.', note: t('操作被中断') };
+        return {
+          ...a,
+          status: 'failed' as const,
+          result: 'Interrupted before it finished. It may or may not have taken effect.',
+          note: t('操作被中断'),
+          retry: a.status === 'running' ? ('unsure' as const) : ('ready' as const),
+        };
       }),
     }));
     if (!changed) return session;
@@ -222,30 +234,27 @@ export class Assistant {
   send(id: string, message: string) {
     const text = requireMessage(message);
     this.assertIdle(id);
-    // Sending something new answers any open question with a no, so nothing is left waiting behind it.
-    this.mutate(id, (session) => {
-      for (const action of pendingActions(session)) {
-        action.status = 'rejected';
-        action.result = 'The user sent a new message instead of approving this.';
-      }
-    });
     this.addMessage(id, { role: 'user', content: text, at: new Date().toISOString() });
     return { job: this.startTurn(id, text) };
   }
 
-  /** Runs what was approved and rejects the rest. Rejecting everything ends the turn without asking the agent again. */
-  decide(id: string, approve: string[], allowReads = false) {
+  /**
+   * Decides only the actions named, so other cards keep waiting and nothing is approved by omission.
+   * Rejecting without approving anything ends the turn without asking the agent again.
+   */
+  decide(id: string, { approve = [], reject = [], allowReads = false }: { approve?: string[]; reject?: string[]; allowReads?: boolean }) {
     this.assertIdle(id);
     const session = this.get(id);
     const pending = pendingActions(session);
-    if (!pending.length) throw new BadRequest(t('没有等待审批的操作'));
-    const approved = pending.filter((a) => approve.includes(a.id)).map((a) => a.id);
+    const rejected = pending.filter((a) => reject.includes(a.id)).map((a) => a.id);
+    const approved = pending.filter((a) => approve.includes(a.id) && !rejected.includes(a.id)).map((a) => a.id);
+    if (!approved.length && !rejected.length) throw new BadRequest(t('没有等待审批的操作'));
     this.mutate(id, (current) => {
       if (allowReads) current.allowReads = true;
       for (const action of pendingActions(current)) {
         if (approved.includes(action.id)) {
           action.status = 'approved';
-        } else {
+        } else if (rejected.includes(action.id)) {
           action.status = 'rejected';
           action.result = 'The user rejected this.';
         }
@@ -254,6 +263,42 @@ export class Assistant {
     this.deps.jobs.send({ type: 'library' });
     if (!approved.length) return { job: null };
     return { job: this.startTurn(id, session.title, approved) };
+  }
+
+  /** The user's changes to a waiting action, limited to the choices its card offers. */
+  editAction(id: string, actionId: string, changes: Record<string, unknown>): AssistantSession {
+    this.assertIdle(id);
+    this.mutate(id, (session) => {
+      const action = pendingActions(session).find((a) => a.id === actionId);
+      if (!action) throw new BadRequest(t('没有等待审批的操作'));
+      for (const [key, value] of Object.entries(changes)) {
+        const option = action.options?.find((o) => o.key === key);
+        if (!option?.choices.some((c) => c.id === value)) throw new BadRequest(t('请求无效'));
+        option.value = value as string;
+        action.args[key] = value;
+      }
+    });
+    this.deps.jobs.send({ type: 'library' });
+    return this.get(id);
+  }
+
+  /** Runs actions again exactly as approved. The agent isn't called, and sees the new outcome on its next turn. */
+  retry(id: string, actionIds: string[]) {
+    this.assertIdle(id);
+    const session = this.get(id);
+    const queue = session.messages.flatMap((m) => m.actions ?? []).filter((a) => a.retry && actionIds.includes(a.id)).map((a) => a.id);
+    if (!queue.length) throw new BadRequest(t('没有可以重试的操作'));
+    this.mutate(id, (current) => {
+      for (const action of current.messages.flatMap((m) => m.actions ?? [])) {
+        if (!queue.includes(action.id)) continue;
+        action.status = 'approved';
+        delete action.result;
+        delete action.note;
+        delete action.retry;
+      }
+    });
+    this.deps.jobs.send({ type: 'library' });
+    return { job: this.startTurn(id, session.title, queue, false) };
   }
 
   update(id: string, patch: { model?: string; thinking?: string }): AssistantSession {
@@ -298,17 +343,18 @@ export class Assistant {
 
   // A turn ------------------------------------------------------------------
 
-  private startTurn(id: string, label: string, approved: string[] = []): Job {
+  private startTurn(id: string, label: string, approved: string[] = [], thenAskAgent = true): Job {
     return this.deps.jobs.start(
       { kind: 'assistant', paperId: ASSISTANT_OWNER, targetId: id, label: t('助手：{title}', { title: clip(label, 40) }) },
       async (ctx) => {
         await this.runActions(id, approved, ctx);
-        await this.converse(id, ctx);
+        if (thenAskAgent) await this.converse(id, ctx);
       },
       (error, canceled) => {
         this.mutate(id, (session) => {
           for (const action of session.messages.flatMap((m) => m.actions ?? [])) {
             if (action.status === 'running' || action.status === 'approved') {
+              action.retry = action.status === 'running' ? 'unsure' : 'ready';
               action.status = 'canceled';
               action.result = canceled ? 'The user stopped this before it finished.' : `Stopped by an error: ${error}`;
             }
@@ -340,7 +386,8 @@ export class Assistant {
       ctx.signal.throwIfAborted();
       this.addMessage(id, {
         role: 'assistant',
-        content: text,
+        // A reply may only repeat what's already waiting, which leaves nothing else to show for it.
+        content: text || (actions.length ? '' : t('这些操作还在等你批准。')),
         actions: actions.length ? actions : undefined,
         agent: [session.harness, session.model, session.thinking].filter(Boolean).join(' · '),
         at: new Date().toISOString(),
@@ -360,12 +407,8 @@ export class Assistant {
 
   private needsApproval(access: AssistantAccess, session: AssistantSession): boolean {
     if (access === 'write') return true;
-    if (access === 'external') return false;
-    return !this.canReadLibrary(session);
-  }
-
-  private canReadLibrary(session: AssistantSession): boolean {
-    return session.allowReads || this.deps.settings().assistant.autoApproveReads;
+    if (access === 'read') return !(session.allowReads || this.deps.settings().assistant.autoApproveReads);
+    return false;
   }
 
   /** Bad requests become failed actions that go back to the agent. They never reach the user to approve. */
@@ -385,7 +428,8 @@ export class Assistant {
     calls = calls.filter((call, i) => calls.findIndex((other) => JSON.stringify(other) === JSON.stringify(call)) === i);
     const inputs = calls.flatMap((c) => (c.tool === 'add_arxiv' && typeof c.args.input === 'string' ? [c.args.input.trim()] : []));
     const lookups = inputs.length ? await this.deps.lookupArxiv(this.vault, [...new Set(inputs)]) : [];
-    const ctx: PrepareContext = { incoming: new Map(), lookups: new Map(lookups.map((l) => [l.input, l])) };
+    const pending = pendingActions(session);
+    const ctx: PrepareContext = { incoming: new Map(), lookups: new Map(lookups.map((l) => [l.input, l])), pending };
     for (const [index, call] of calls.entries()) {
       if (index >= MAX_ACTIONS_PER_REPLY) {
         actions.push(failed('too_many', {}, `Only the first ${MAX_ACTIONS_PER_REPLY} actions were accepted. Ask for the rest once those are finished.`));
@@ -398,6 +442,8 @@ export class Assistant {
       }
       try {
         const prepared = await tool.prepare(call.args, ctx);
+        // Cards stay open across messages, so an agent may ask again for what's already waiting.
+        if (pending.some((a) => a.tool === call.tool && JSON.stringify(a.args) === JSON.stringify(prepared.args))) continue;
         actions.push({
           id: randomBytes(6).toString('hex'),
           tool: call.tool,
@@ -448,7 +494,7 @@ export class Assistant {
     } catch (err) {
       if (ctx.signal.aborted) throw err;
       const message = (err as Error).message;
-      this.patchAction(id, action.id, { status: 'failed', result: message, note: message });
+      this.patchAction(id, action.id, { status: 'failed', result: message, note: message, retry: 'ready' });
     }
   }
 
@@ -468,7 +514,7 @@ export class Assistant {
 
   private toolDocs(): string {
     return Object.entries(this.tools)
-      .map(([name, tool]) => `- ${name}${tool.access === 'write' ? ' [approval]' : ''}: ${tool.doc}`)
+      .map(([name, tool]) => `- ${name}${tool.access === 'write' ? ' [approval]' : tool.access === 'read' ? ' [may need approval]' : ''}: ${tool.doc}`)
       .join('\n');
   }
 
@@ -511,22 +557,42 @@ export class Assistant {
     const blogStyles = BLOG_STYLES.map((s) => s.id);
     const languages = LANGUAGES.map((l) => l.id);
     const lengths = PODCAST_LENGTHS.map((l) => l.id);
+    /** A style set in Settings as custom isn't among the presets, but must stay selectable once it's the choice. */
+    const styleChoices = (presets: Option[], value: string) => [
+      ...presets.map(({ id, label }) => ({ id, label })),
+      ...(value === 'custom' ? [{ id: 'custom', label: t('自定义') }] : []),
+    ];
 
     return {
       list_papers: {
-        access: 'read',
-        doc: `Lists the papers in the library, newest first. args: query? (every word must appear in the title, authors, abstract or full text; matches in the text come with a page and snippet), limit? (1-${MAX_LISTED_PAPERS}).`,
+        access: 'catalog',
+        doc: `Lists the papers in the library, newest first. args: query? (every word must appear in the title, authors or abstract), limit? (1-${MAX_LISTED_PAPERS}).`,
         prepare: (args) => {
           const query = stringArg(args, 'query', 200);
           const limit = intArg(args, 'limit', 1, MAX_LISTED_PAPERS);
           return { args: defined({ query, limit }), summary: query ? t('在书架中搜索：{query}', { query }) : t('查看书架') };
         },
         run: (args) => {
-          const query = args.query as string | undefined;
+          const words = wordsOf((args.query as string | undefined) ?? '');
           const limit = (args.limit as number | undefined) ?? MAX_LISTED_PAPERS;
-          const papers = this.vault.listPapers();
-          const rows = query ? this.searchLibrary(papers, query) : papers.map((p) => ({ paper: p, match: undefined }));
-          const shown = rows.slice(0, limit);
+          const rows = this.vault.listPapers().filter((p) => words.every((w) => detailsOf(p).includes(w)));
+          return {
+            result: JSON.stringify({ total: rows.length, shown: Math.min(rows.length, limit), papers: rows.slice(0, limit).map(describePaper) }),
+            note: t('{count} 篇论文', { count: rows.length }),
+          };
+        },
+      },
+
+      search_paper_text: {
+        access: 'read',
+        doc: `Searches inside the full text of the papers in the library, for what the details don't mention. Matches come with a page and snippet. args: query (every word must appear), limit? (1-${MAX_LISTED_PAPERS}).`,
+        prepare: (args) => {
+          const query = requireString(args, 'query', 200);
+          return { args: defined({ query, limit: intArg(args, 'limit', 1, MAX_LISTED_PAPERS) }), summary: t('在论文全文中搜索：{query}', { query }) };
+        },
+        run: (args) => {
+          const rows = this.searchLibrary(this.vault.listPapers(), args.query as string);
+          const shown = rows.slice(0, (args.limit as number | undefined) ?? MAX_LISTED_PAPERS);
           return {
             result: JSON.stringify({ total: rows.length, shown: shown.length, papers: shown.map((r) => ({ ...describePaper(r.paper), match: r.match })) }),
             note: t('{count} 篇论文', { count: rows.length }),
@@ -535,7 +601,7 @@ export class Assistant {
       },
 
       get_paper: {
-        access: 'read',
+        access: 'catalog',
         doc: 'Shows one paper: details, abstract, its blog posts and podcast episodes, and the collections it is in. args: paper (id or arXiv id).',
         prepare: (args) => {
           const { id, title } = this.resolveOwnerPaper(requireString(args, 'paper'));
@@ -586,7 +652,7 @@ export class Assistant {
       },
 
       list_collections: {
-        access: 'read',
+        access: 'catalog',
         doc: 'Lists the collections in the library and the papers in each. No args.',
         prepare: () => ({ args: {}, summary: t('查看合集列表') }),
         run: () => ({
@@ -616,12 +682,12 @@ export class Assistant {
             summary: t('在 arXiv 搜索：{query}', { query }),
           };
         },
-        run: async (args, _ctx, session) => {
+        run: async (args) => {
           const hits = await this.deps.searchArxiv(this.vault, args.query as string, {
             maxResults: args.max_results as number | undefined,
             sort: args.sort as 'relevance' | 'recent' | undefined,
           });
-          return { result: JSON.stringify(hits.map((hit) => describeHit(hit, this.canReadLibrary(session)))), note: t('{count} 篇论文', { count: hits.length }), hits };
+          return { result: JSON.stringify(hits.map(describeHit)), note: t('{count} 篇论文', { count: hits.length }), hits };
         },
       },
 
@@ -776,13 +842,12 @@ export class Assistant {
               synthesize: (synthesize && hasVoice) || undefined,
             }),
             summary: t('生成播客：{title}', { title }),
-            details: [
-              { label: t('风格'), value: tx(PODCAST_STYLES.find((s) => s.id === style)?.label ?? t('自定义')) },
-              { label: t('语言'), value: LANGUAGES.find((l) => l.id === language)?.label ?? language },
-              { label: t('长度'), value: tx(PODCAST_LENGTHS.find((l) => l.id === length)?.label ?? length) },
-              ...(instructions ? [{ label: t('额外要求'), value: instructions }] : []),
-              ...audio,
+            options: [
+              { key: 'style', label: t('风格'), value: style, choices: styleChoices(PODCAST_STYLES, style) },
+              { key: 'language', label: t('语言'), value: language, choices: LANGUAGES },
+              { key: 'length', label: t('长度'), value: length, choices: PODCAST_LENGTHS.map(({ id, label }) => ({ id, label })) },
             ],
+            details: [...(instructions ? [{ label: t('额外要求'), value: instructions }] : []), ...audio],
           };
         },
         run: async (args, ctx) => {
@@ -820,11 +885,11 @@ export class Assistant {
           return {
             args: defined({ paper: ref, style, customStyle: style === 'custom' ? defaults.customStyle : undefined, language, instructions }),
             summary: t('生成博客：{title}', { title }),
-            details: [
-              { label: t('风格'), value: tx(BLOG_STYLES.find((s) => s.id === style)?.label ?? t('自定义')) },
-              { label: t('语言'), value: LANGUAGES.find((l) => l.id === language)?.label ?? language },
-              ...(instructions ? [{ label: t('额外要求'), value: instructions }] : []),
+            options: [
+              { key: 'style', label: t('风格'), value: style, choices: styleChoices(BLOG_STYLES, style) },
+              { key: 'language', label: t('语言'), value: language, choices: LANGUAGES },
             ],
+            details: instructions ? [{ label: t('额外要求'), value: instructions }] : undefined,
           };
         },
         run: async (args, ctx) => {
@@ -866,6 +931,26 @@ export class Assistant {
           };
         },
       },
+
+      withdraw_action: {
+        access: 'catalog',
+        doc: 'Takes back one of your actions that is still waiting for approval, using the id on its result. Use it when the user no longer wants it, or to replace it with a corrected one. args: action.',
+        prepare: (args, ctx) => {
+          const id = requireString(args, 'action', 100);
+          const target = ctx.pending.find((a) => a.id === id);
+          if (!target) throw new ToolError(`Nothing is waiting for approval with the id "${id}".`);
+          return { args: { action: target.id }, summary: t('撤回待批准的操作：{summary}', { summary: target.summary }) };
+        },
+        run: (args, _ctx, session) => {
+          this.mutate(session.id, (current) => {
+            const target = pendingActions(current).find((a) => a.id === args.action);
+            if (!target) return;
+            target.status = 'canceled';
+            target.result = 'You withdrew this while it was waiting, so it did not run.';
+          });
+          return { result: 'Withdrawn.' };
+        },
+      },
     };
   }
 
@@ -877,11 +962,11 @@ export class Assistant {
 
   /** Every word must match. Details count for more than the text, which is what makes this useful as a ranking. */
   private searchLibrary(papers: PaperSummary[], query: string) {
-    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+    const words = wordsOf(query);
     const inDetails: { paper: PaperSummary; match?: { page: number; snippet: string } }[] = [];
     const inText: typeof inDetails = [];
     for (const paper of papers) {
-      const details = `${paper.title} ${paper.authors.join(' ')} ${paper.abstract ?? ''}`.toLowerCase();
+      const details = detailsOf(paper);
       if (words.every((w) => details.includes(w))) {
         inDetails.push({ paper });
         continue;

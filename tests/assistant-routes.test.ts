@@ -66,6 +66,26 @@ describe('assistant routes', () => {
     expect((await call(`/papers/${paperId}`)).data.year).toBe(1999);
   });
 
+  it('changes a card and retries over the API, within what is offered', async () => {
+    agent.replies = [`<${TOOL_TAG}>[{"tool":"generate_blog","args":{"paper":"${paperId}"}}]</${TOOL_TAG}>`];
+    const { data: created } = await call('/assistant/sessions', { message: 'write', harness: 'claude' });
+    await settled(created.sessionId);
+    const path = `/assistant/sessions/${created.sessionId}`;
+    const { data: session } = await call(path);
+    const [action] = session.messages.at(-1).actions;
+
+    const patch = (body: unknown, headers: Record<string, string> = {}) =>
+      fetch(`${base}/api${path}/actions/${action.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
+    expect((await patch({ language: 'klingon' })).status).toBe(400);
+    expect((await patch({ language: 'en' }, { Origin: 'https://evil.example' })).status).toBe(403);
+    const edited = (await (await patch({ language: 'en' })).json()) as any;
+    expect(edited.messages.at(-1).actions[0].args.language).toBe('en');
+
+    expect((await call(`${path}/retry`, { actions: [action.id] })).status).toBe(400);
+    expect((await call(`${path}/retry`, { actions: 'all' })).status).toBe(400);
+    expect((await call(`${path}/retry`, { actions: [action.id] }, { Origin: 'https://evil.example' })).status).toBe(403);
+  });
+
   it('rejects a decision from another website', async () => {
     const { data: created } = await call('/assistant/sessions', { message: 'hello', harness: 'claude' });
     await settled(created.sessionId);
