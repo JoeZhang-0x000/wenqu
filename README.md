@@ -19,10 +19,10 @@ Wenqu turns papers into podcasts you can listen to at any time, so reading no lo
 
 <p>
   <b>Supported backends</b>&nbsp;&nbsp;
-  <a href="https://www.anthropic.com/claude-code"><img src="docs/images/backends/claude-code.svg" height="18" align="absmiddle" alt=""> Claude Code</a>&nbsp;&nbsp;
-  <a href="https://github.com/openai/codex"><img src="docs/images/backends/codex.svg" height="18" align="absmiddle" alt=""> Codex</a>&nbsp;&nbsp;
-  <a href="https://www.npmjs.com/package/@earendil-works/pi-coding-agent"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/backends/pi-dark.svg"><img src="docs/images/backends/pi.svg" height="16" align="absmiddle" alt=""></picture> pi</a>&nbsp;&nbsp;
-  <img src="docs/images/backends/deepseek.svg" height="18" align="absmiddle" alt=""> DeepSeek Harness
+  <a href="https://claude.com/product/claude-code"><img src="docs/images/backends/claude-code.svg" height="18" align="absmiddle" alt=""> Claude Code</a>&nbsp;&nbsp;
+  <a href="https://openai.com/codex/"><img src="docs/images/backends/codex.svg" height="18" align="absmiddle" alt=""> Codex</a>&nbsp;&nbsp;
+  <a href="https://pi.dev/"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/backends/pi-dark.svg"><img src="docs/images/backends/pi.svg" height="16" align="absmiddle" alt=""></picture> pi</a>&nbsp;&nbsp;
+  <a href="https://www.deepseek.com/en/harness/"><img src="docs/images/backends/deepseek.svg" height="18" align="absmiddle" alt=""> DeepSeek Harness</a>
 </p>
 
 ![A 30-second tour: opening a paper from the library, clicking a page citation in an answer to jump to that page, selecting a passage, playing a podcast episode, and the assistant answering a research question](docs/images/tour.gif)
@@ -52,7 +52,7 @@ A paper becomes a two-host podcast. Edit the script line by line, and follow the
 **You will need:**
 
 - Node.js 20 or later
-- At least one agent CLI: [Claude Code](https://www.anthropic.com/claude-code), [Codex](https://github.com/openai/codex), [pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) or DeepSeek Harness (for questions, blog posts and scripts)
+- At least one agent CLI: [Claude Code](https://claude.com/product/claude-code), [Codex](https://openai.com/codex/), [pi](https://pi.dev/) or [DeepSeek Harness](https://www.deepseek.com/en/harness/) (for questions, blog posts and scripts)
 - An API key for [Doubao Speech](https://docs.volcengine.com/docs/doubao-voice/podcast-api-websocket-v3protocol?lang=zh) (only for synthesizing audio)
 
 **Install and run:**

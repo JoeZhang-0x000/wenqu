@@ -18,10 +18,10 @@
 
 <p>
   <b>支持的后端</b>&nbsp;&nbsp;
-  <a href="https://www.anthropic.com/claude-code"><img src="docs/images/backends/claude-code.svg" height="18" align="absmiddle" alt=""> Claude Code</a>&nbsp;&nbsp;
-  <a href="https://github.com/openai/codex"><img src="docs/images/backends/codex.svg" height="18" align="absmiddle" alt=""> Codex</a>&nbsp;&nbsp;
-  <a href="https://www.npmjs.com/package/@earendil-works/pi-coding-agent"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/backends/pi-dark.svg"><img src="docs/images/backends/pi.svg" height="16" align="absmiddle" alt=""></picture> pi</a>&nbsp;&nbsp;
-  <img src="docs/images/backends/deepseek.svg" height="18" align="absmiddle" alt=""> DeepSeek Harness
+  <a href="https://claude.com/product/claude-code"><img src="docs/images/backends/claude-code.svg" height="18" align="absmiddle" alt=""> Claude Code</a>&nbsp;&nbsp;
+  <a href="https://openai.com/codex/"><img src="docs/images/backends/codex.svg" height="18" align="absmiddle" alt=""> Codex</a>&nbsp;&nbsp;
+  <a href="https://pi.dev/"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/backends/pi-dark.svg"><img src="docs/images/backends/pi.svg" height="16" align="absmiddle" alt=""></picture> pi</a>&nbsp;&nbsp;
+  <a href="https://www.deepseek.com/en/harness/"><img src="docs/images/backends/deepseek.svg" height="18" align="absmiddle" alt=""> DeepSeek Harness</a>
 </p>
 
 ![30 秒演示：从书架打开论文，点击回答里的页码跳到原文，选中一段文字，播放播客，再到助手页看一个研究问题的回答](docs/images/zh/tour.gif)
@@ -51,7 +51,7 @@ Agent 原生管理论文库。检索文献，整理书架，撰写综述。
 **你需要：**
 
 - Node.js 20 或更高版本
-- 至少一个 Agent CLI：[Claude Code](https://www.anthropic.com/claude-code)、[Codex](https://github.com/openai/codex)、[pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) 或 DeepSeek Harness（问答、写博客、写脚本时需要）
+- 至少一个 Agent CLI：[Claude Code](https://claude.com/product/claude-code)、[Codex](https://openai.com/codex/)、[pi](https://pi.dev/) 或 [DeepSeek Harness](https://www.deepseek.com/en/harness/)（问答、写博客、写脚本时需要）
 - [豆包语音](https://docs.volcengine.com/docs/doubao-voice/podcast-api-websocket-v3protocol?lang=zh)的 API Key（只有合成音频时需要）
 
 **安装并启动：**
