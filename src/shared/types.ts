@@ -33,7 +33,7 @@ export interface Settings {
     customStyle: string;
   };
   assistant: {
-    /** Lets the assistant read the library without asking. Changes always need approval. */
+    /** Lets the assistant read inside papers without asking. Changes always need approval. */
     autoApproveReads: boolean;
   };
   doubao: {
@@ -308,10 +308,11 @@ export interface ArxivHit extends ArxivMeta {
 }
 
 /**
- * `read` looks at the library, `write` changes it, and `external` only asks arXiv.
+ * `catalog` only looks at the library's details (titles, authors, abstracts) or this chat's own requests,
+ * `read` looks inside papers, `write` changes the library, and `external` only asks arXiv.
  * Whether an action waits for the user follows from this, never from the agent.
  */
-export type AssistantAccess = 'read' | 'write' | 'external';
+export type AssistantAccess = 'catalog' | 'read' | 'write' | 'external';
 export type AssistantActionStatus = 'pending' | 'approved' | 'running' | 'done' | 'failed' | 'rejected' | 'canceled';
 
 export interface AssistantAction {
@@ -323,11 +324,18 @@ export interface AssistantAction {
   /** Written by the server from `args`, so the agent can't misdescribe what it asks for. */
   summary: string;
   details?: { label: string; value: string; before?: string }[];
+  /** What the user can change on the card before approving. Only these keys, and only these choices, can be set. */
+  options?: { key: string; label: string; value: string; choices: Option[] }[];
   status: AssistantActionStatus;
   /** What the agent is told happened. */
   result?: string;
   /** What the user is told happened, when it adds to the summary. */
   note?: string;
+  /**
+   * Set once an action has been approved and then didn't finish, so the user can run it again as it stands.
+   * `unsure` means it may already have taken effect. Requests that never reached the user don't have this.
+   */
+  retry?: 'ready' | 'unsure';
   hits?: ArxivHit[];
   /** What this produced or refers to, for a link. */
   target?: { ownerId: string; tab?: 'blog' | 'podcast'; item?: string };
@@ -356,7 +364,7 @@ export interface AssistantSessionMeta {
 }
 
 export interface AssistantSession extends Omit<AssistantSessionMeta, 'pending'> {
-  /** The user chose to stop being asked about reads in this chat. */
+  /** The user chose to stop being asked about reading papers in this chat. */
   allowReads: boolean;
   messages: AssistantMessage[];
 }
