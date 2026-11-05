@@ -23,6 +23,7 @@ import {
 } from '../shared/types.js';
 import { runAgent } from './agents.js';
 import { detectAgents } from './harness.js';
+import { applyUpdate, updateStatus } from './update.js';
 import { importArxiv, lookupArxiv, searchArxiv } from './arxiv.js';
 import { Config, expandHome } from './config.js';
 import { DoubaoError, synthesizePodcast } from './doubao.js';
@@ -57,9 +58,11 @@ export interface AppOptions {
   config: Config;
   /** Allowed in the Host and Origin checks, in addition to the server's own port. */
   devOrigin?: string;
+  /** Replaces this process with the current build. Missing where that isn't possible, as in the dev server. */
+  restart?: () => void;
 }
 
-export function createApp({ config, devOrigin }: AppOptions) {
+export function createApp({ config, devOrigin, restart }: AppOptions) {
   const app = express();
   app.disable('x-powered-by');
   const jobs = new Jobs();
@@ -121,6 +124,23 @@ export function createApp({ config, devOrigin }: AppOptions) {
       jobs.send({ type: 'library' });
     }
     res.json(config.public());
+  });
+
+  // Updates -----------------------------------------------------------------
+
+  api.get('/update', async (_req, res) => {
+    const status = await updateStatus();
+    res.json(restart ? status : { ...status, blocked: t('开发模式下请手动更新') });
+  });
+  api.post('/update', async (_req, res) => {
+    if (!restart) throw new BadRequest(t('开发模式下请手动更新'));
+    // A restart would lose them, since tasks only live in memory.
+    if (jobs.list().some((j) => j.status === 'running')) throw new BadRequest(t('还有任务在运行，请等它们结束后再更新'));
+    const { blocked } = await updateStatus();
+    if (blocked) throw new BadRequest(blocked);
+    await applyUpdate();
+    res.on('finish', restart);
+    res.json({ ok: true });
   });
 
   // Agents ------------------------------------------------------------------

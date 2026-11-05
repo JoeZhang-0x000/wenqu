@@ -7,6 +7,7 @@ import { getLocale, setLocale, t, type Locale } from '../shared/i18n.js';
 import { importArxiv, parseArxivInput } from './arxiv.js';
 import { Config } from './config.js';
 import { createApp, listen } from './server.js';
+import { restartServer } from './update.js';
 import { Vault } from './vault.js';
 
 const HELP = {
@@ -103,8 +104,9 @@ async function main(): Promise<void> {
   const port = Number(values.port ?? 4317);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(t('无效的端口：{port}', { port: String(values.port) }));
 
-  const { app } = createApp({ config, devOrigin: process.env.WENQU_DEV_ORIGIN });
-  const { port: actual } = await listen(app, port);
+  const devOrigin = process.env.WENQU_DEV_ORIGIN;
+  const { app } = createApp({ config, devOrigin, restart: devOrigin ? undefined : () => restartServer(server, actual) });
+  const { server, port: actual } = await listen(app, port);
   const url = `http://127.0.0.1:${actual}`;
   console.log(t('\n  问渠已启动\n\n  地址   {url}\n  Vault  {vault}\n\n  按 Ctrl+C 退出\n', { url, vault: config.get().vaultPath }));
   if (!values['no-open']) openBrowser(url);

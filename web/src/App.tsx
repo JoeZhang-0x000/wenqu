@@ -1,7 +1,7 @@
 import { Loader2, Moon, Settings as SettingsIcon, Sun, X } from 'lucide-react';
 import { t } from '../../src/shared/i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AssistantSessionMeta } from '../../src/shared/types';
+import type { AssistantSessionMeta, UpdateStatus } from '../../src/shared/types';
 import { Assistant } from './Assistant';
 import { api, confirmStore, connectEvents, fail, jobsStore, localeStore, refreshSettings, routeStore, settingsStore, toastStore, useFetch, useStore } from './lib';
 import { CollectionView, Collections } from './Collections';
@@ -86,6 +86,7 @@ export function App() {
           {!settings.doubao.hasKey && <span className="dot corner" />}
         </button>
       </header>
+      <UpdateBanner />
       <main className="main">
         {route.page === 'library' && <Library />}
         {route.page === 'works' && <Works />}
@@ -165,6 +166,66 @@ function Activity() {
             </div>
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+const UPDATE_CHECK_MS = 60 * 60_000;
+
+/** After an update, the server is gone until the new build has started. */
+async function reloadWhenBack(): Promise<void> {
+  for (let attempt = 0; attempt < 30; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    try {
+      await api('/settings');
+      location.reload();
+      return;
+    } catch {
+      /* Not back yet. */
+    }
+  }
+  throw new Error(t('更新已完成，但服务没有重新启动，请手动启动'));
+}
+
+function UpdateBanner() {
+  const [status, setStatus] = useState<UpdateStatus>();
+  const [busy, setBusy] = useState(false);
+  const [closed, setClosed] = useState(false);
+  useEffect(() => {
+    const load = () => api<UpdateStatus>('/update').then(setStatus).catch(() => {});
+    void load();
+    const timer = setInterval(load, UPDATE_CHECK_MS);
+    return () => clearInterval(timer);
+  }, []);
+  if (!status?.behind || closed) return null;
+
+  const update = async () => {
+    setBusy(true);
+    try {
+      await api('/update', { method: 'POST' });
+      await reloadWhenBack();
+    } catch (err) {
+      fail(err);
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="notice update">
+      <span>
+        {busy ? t('正在更新，完成后会自动刷新') : t('有新版本，落后 {count} 个提交', { count: status.behind })}
+        {!busy && status.blocked && ` · ${status.blocked}`}
+      </span>
+      {!status.blocked && (
+        <button className="btn small" disabled={busy} onClick={() => void update()}>
+          {busy && <Loader2 size={13} className="spin" />}
+          {t('更新并重启')}
+        </button>
+      )}
+      {!busy && (
+        <button className="icon" title={t('关闭')} onClick={() => setClosed(true)}>
+          <X size={14} />
+        </button>
       )}
     </div>
   );
