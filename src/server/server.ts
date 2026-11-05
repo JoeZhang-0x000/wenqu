@@ -4,7 +4,7 @@ import type { Server } from 'node:http';
 import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express, { type NextFunction, type Request, type Response } from 'express';
-import { setLocale, t } from '../shared/i18n.js';
+import { getLocale, setLocale, t } from '../shared/i18n.js';
 import {
   AGENT_BACKENDS,
   MAX_ROUND_CHARS,
@@ -15,6 +15,7 @@ import {
   type ChatMessage,
   type CollectionMode,
   type PaperFigure,
+  type PaperSummary,
   type Podcast,
   type ScriptRound,
   type ServerEvent,
@@ -28,7 +29,7 @@ import { DoubaoError, synthesizePodcast } from './doubao.js';
 import { FIGURES_VERSION, extractFigures, figurePath, figuresSupported, inlineFigures, keepKnownFigures } from './figures.js';
 import { Jobs } from './jobs.js';
 import { PDFJS_DIR, pageMarkedText } from './pdf.js';
-import { blogPrompt, chatPrompt, collectionSource, paperSource, scriptPrompt, type SourceFigure } from './prompts.js';
+import { blogPrompt, chatPrompt, collectionSource, paperSource, parseTagReply, scriptPrompt, tagsPrompt, type SourceFigure } from './prompts.js';
 import { parseScript } from './script.js';
 import { Assistant } from './assistant.js';
 import { BadRequest, NotFound, Vault, newOutputId } from './vault.js';
@@ -40,6 +41,9 @@ const MAX_DIRECT_INPUT = 20_000;
 const MAX_PDF_BYTES = 200 * 1024 * 1024;
 const MAX_COLLECTION_PAPERS = 12;
 const MAX_ARXIV_LOOKUP = 50;
+/** The opening of a paper says enough to tag it. */
+const MAX_TAGGING_CHARS = 8_000;
+const MAX_KNOWN_TAGS = 200;
 
 const webRoot = () => {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -199,6 +203,7 @@ export function createApp({ config, devOrigin }: AppOptions) {
         throw new BadRequest(err.message);
       });
       jobs.send({ type: 'library' });
+      if (req.query.autoTag === '1' && !duplicate) tagNewPaper(meta.id);
       res.json({ paper: vault.getPaper(meta.id), duplicate });
     },
   );
@@ -215,14 +220,16 @@ export function createApp({ config, devOrigin }: AppOptions) {
       throw new BadRequest(err.message);
     });
     jobs.send({ type: 'library' });
+    if (req.body?.autoTag === true && !duplicate) tagNewPaper(meta.id);
     res.json({ paper: vault.getPaper(meta.id), duplicate });
   });
 
   api.get('/papers/:id', (req, res) => res.json(vault.getPaper(req.params.id)));
   api.patch('/papers/:id', json, (req, res) => {
-    const { title, authors, year, abstract } = req.body;
+    const { title, authors, year, abstract, tags } = req.body;
+    if (tags !== undefined && !Array.isArray(tags)) throw new BadRequest(t('请求无效'));
     const patch = Object.fromEntries(
-      Object.entries({ title, authors, year, abstract }).filter(([, v]) => v !== undefined),
+      Object.entries({ title, authors, year, abstract, tags }).filter(([, v]) => v !== undefined),
     );
     const paper = vault.updatePaper(req.params.id, patch);
     jobs.send({ type: 'library' });
@@ -244,6 +251,50 @@ export function createApp({ config, devOrigin }: AppOptions) {
     vault.getPaper(req.params.id);
     revealInFileManager(vault.paperDir(req.params.id));
     res.json({ ok: true });
+  });
+
+  // Tags --------------------------------------------------------------------
+
+  api.get('/tags', (_req, res) => res.json(vault.listTags()));
+
+  const canTag = (paper: PaperSummary) => paper.textChars >= 50 || Boolean(paper.abstract);
+  /** Adding a batch shouldn't start an agent per paper, so these wait their turn. */
+  let tagQueue: Promise<void> = Promise.resolve();
+
+  const startTagging = (paperId: string) => {
+    const language = getLocale();
+    const label = t('标签：{title}', { title: vault.getPaper(paperId).title });
+    return jobs.start({ kind: 'tags', paperId, targetId: `tags-${paperId}`, label }, async ({ signal }) => {
+      const turn = tagQueue;
+      let finished!: () => void;
+      tagQueue = new Promise((resolve) => (finished = resolve));
+      try {
+        // Canceling one that is still waiting shouldn't have to wait.
+        await Promise.race([
+          turn,
+          new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true })),
+        ]);
+        signal.throwIfAborted();
+        const meta = vault.getPaper(paperId);
+        const { text, truncated } = pageMarkedText(vault.readPages(paperId), MAX_TAGGING_CHARS);
+        const known = vault.listTags().slice(0, MAX_KNOWN_TAGS).map((c) => c.tag);
+        const raw = await runAgent({ ...agentChoice({}), ...tagsPrompt({ meta, text, truncated, known, language }), signal });
+        vault.addTags(paperId, parseTagReply(raw));
+      } finally {
+        void turn.then(finished);
+      }
+    });
+  };
+
+  /** A scan with no details has nothing to go on, and that's no reason to bother the user while adding it. */
+  const tagNewPaper = (paperId: string) => {
+    if (canTag(vault.getPaper(paperId))) startTagging(paperId);
+  };
+
+  api.post('/papers/:id/tags/generate', (req, res) => {
+    if (!canTag(vault.getPaper(req.params.id))) throw new BadRequest(t('这份 PDF 没有可提取的文字（可能是扫描件），暂时无法生成内容。'));
+    if (jobs.isActive(`tags-${req.params.id}`)) throw new BadRequest(t('正在生成这篇论文的标签'));
+    res.json(startTagging(req.params.id));
   });
 
   const paperContext = (paperId: string) => {

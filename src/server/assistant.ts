@@ -4,9 +4,13 @@ import { t } from '../shared/i18n.js';
 import {
   BLOG_STYLES,
   LANGUAGES,
+  MAX_PAPER_TAGS,
+  MAX_TAG_CHARS,
   PODCAST_LENGTHS,
   PODCAST_STYLES,
+  changeTags,
   isCollectionId,
+  normalizeTags,
   type AgentBackend,
   type ArxivHit,
   type ArxivLookup,
@@ -121,6 +125,16 @@ function choiceArg(args: Args, key: string, choices: string[]): string | undefin
   return value;
 }
 
+function tagsArg(args: Args, key: string): string[] {
+  const value = args[key];
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.some((tag) => typeof tag !== 'string')) throw new ToolError(`"${key}" must be an array of tags.`);
+  if (value.some((tag: string) => tag.trim().length > MAX_TAG_CHARS)) throw new ToolError(`A tag can be at most ${MAX_TAG_CHARS} characters.`);
+  const tags = normalizeTags(value);
+  if (tags.length > MAX_PAPER_TAGS) throw new ToolError(`A paper can have at most ${MAX_PAPER_TAGS} tags.`);
+  return tags;
+}
+
 /** Keeps what was given, so defaults keep following the user's settings until an action runs. */
 const defined = (values: Args): Args => Object.fromEntries(Object.entries(values).filter(([, v]) => v !== undefined));
 
@@ -134,7 +148,7 @@ const describeHit = (hit: ArxivHit) => ({
 });
 
 const wordsOf = (query: string) => query.toLowerCase().split(/\s+/).filter(Boolean);
-const detailsOf = (p: PaperSummary) => `${p.title} ${p.authors.join(' ')} ${p.abstract ?? ''}`.toLowerCase();
+const detailsOf = (p: PaperSummary) => `${p.title} ${p.authors.join(' ')} ${p.abstract ?? ''} ${p.tags.join(' ')}`.toLowerCase();
 
 const describePaper = (p: PaperSummary) => ({
   id: p.id,
@@ -142,6 +156,7 @@ const describePaper = (p: PaperSummary) => ({
   authors: p.authors.slice(0, 6),
   year: p.year,
   arxivId: p.arxivId,
+  tags: p.tags,
   pages: p.pages,
   blogs: p.blogCount,
   podcasts: p.podcastCount,
@@ -566,20 +581,45 @@ export class Assistant {
     return {
       list_papers: {
         access: 'catalog',
-        doc: `Lists the papers in the library, newest first. args: query? (every word must appear in the title, authors or abstract), limit? (1-${MAX_LISTED_PAPERS}).`,
+        doc: `Lists the papers in the library, newest first. args: query? (every word must appear in the title, authors, abstract or tags), tag? (only papers with this tag), untagged? (true for only papers without tags), limit? (1-${MAX_LISTED_PAPERS}).`,
         prepare: (args) => {
           const query = stringArg(args, 'query', 200);
+          const tag = stringArg(args, 'tag', MAX_TAG_CHARS);
+          const untagged = args.untagged === true || undefined;
+          if (tag && untagged) throw new ToolError('Use either "tag" or "untagged", not both.');
           const limit = intArg(args, 'limit', 1, MAX_LISTED_PAPERS);
-          return { args: defined({ query, limit }), summary: query ? t('在书架中搜索：{query}', { query }) : t('查看书架') };
+          const summary = query
+            ? t('在书架中搜索：{query}', { query })
+            : tag
+              ? t('查看标签为“{tag}”的论文', { tag })
+              : untagged
+                ? t('查看没有标签的论文')
+                : t('查看书架');
+          return { args: defined({ query, tag, untagged, limit }), summary };
         },
         run: (args) => {
           const words = wordsOf((args.query as string | undefined) ?? '');
+          const tag = (args.tag as string | undefined)?.toLowerCase();
           const limit = (args.limit as number | undefined) ?? MAX_LISTED_PAPERS;
-          const rows = this.vault.listPapers().filter((p) => words.every((w) => detailsOf(p).includes(w)));
+          const rows = this.vault
+            .listPapers()
+            .filter((p) => words.every((w) => detailsOf(p).includes(w)))
+            .filter((p) => !tag || p.tags.some((x) => x.toLowerCase() === tag))
+            .filter((p) => !args.untagged || !p.tags.length);
           return {
             result: JSON.stringify({ total: rows.length, shown: Math.min(rows.length, limit), papers: rows.slice(0, limit).map(describePaper) }),
             note: t('{count} 篇论文', { count: rows.length }),
           };
+        },
+      },
+
+      list_tags: {
+        access: 'catalog',
+        doc: 'Lists the tags in the library, most used first, with how many papers have each. No args.',
+        prepare: () => ({ args: {}, summary: t('查看标签列表') }),
+        run: () => {
+          const tags = this.vault.listTags();
+          return { result: JSON.stringify(tags), note: t('{count} 个标签', { count: tags.length }) };
         },
       },
 
@@ -693,9 +733,10 @@ export class Assistant {
 
       add_arxiv: {
         access: 'write',
-        doc: 'Downloads a paper from arXiv into the library. args: input (arXiv id or link).',
+        doc: 'Downloads a paper from arXiv into the library, with any tags you give it. args: input (arXiv id or link), tags? (array).',
         prepare: (args, ctx) => {
           const input = requireString(args, 'input', 300);
+          const tags = this.vault.spellTags(tagsArg(args, 'tags'));
           const lookup = ctx.lookups.get(input);
           if (!lookup?.id) throw new ToolError(`"${input}" is not an arXiv id or link.`);
           if (lookup.paperId) throw new ToolError('Already in the library.');
@@ -703,19 +744,22 @@ export class Assistant {
           const title = lookup.meta?.title ?? lookup.id;
           ctx.incoming.set(withoutArxivVersion(lookup.id), { id: lookup.id, title });
           return {
-            args: { input: lookup.id },
+            args: tags.length ? { input: lookup.id, tags } : { input: lookup.id },
             summary: t('从 arXiv 添加：{title}', { title }),
             details: [
               { label: 'arXiv', value: lookup.id },
               ...(lookup.meta?.authors.length ? [{ label: t('作者'), value: clip(lookup.meta.authors.join(', '), 200) }] : []),
               ...(lookup.meta?.abstract ? [{ label: t('摘要'), value: clip(lookup.meta.abstract, 400) }] : []),
+              ...(tags.length ? [{ label: t('标签'), value: tags.join(', ') }] : []),
             ],
           };
         },
         run: async (args, ctx) => {
           const { meta, duplicate } = await this.deps.importArxiv(this.vault, args.input as string, ctx.signal);
+          const tags = args.tags as string[] | undefined;
+          if (tags) this.vault.addTags(meta.id, tags);
           return {
-            result: JSON.stringify({ id: meta.id, title: meta.title, alreadyInLibrary: duplicate }),
+            result: JSON.stringify({ id: meta.id, title: meta.title, alreadyInLibrary: duplicate, tags: this.vault.getPaper(meta.id).tags }),
             note: duplicate ? t('已在书架中') : undefined,
             target: { ownerId: meta.id },
           };
@@ -755,6 +799,34 @@ export class Assistant {
           const updated = this.vault.updatePaper(paper as string, patch);
           this.deps.jobs.send({ type: 'library' });
           return { result: JSON.stringify(describePaper(updated)), target: { ownerId: updated.id } };
+        },
+      },
+
+      tag_paper: {
+        access: 'write',
+        doc: "Adds and removes a paper's tags, leaving its others alone. args: paper (id, or the arXiv id of a paper added earlier in this block), add? (array), remove? (array).",
+        prepare: (args, ctx) => {
+          const { ref, title } = this.resolveOwnerInBatch(requireString(args, 'paper', 300), ctx);
+          if (isCollectionId(ref)) throw new ToolError(`"${ref}" is a collection, and this needs a paper.`);
+          const incoming = [...ctx.incoming.values()].some((paper) => paper.id === ref);
+          const current = incoming ? [] : this.vault.getPaper(ref).tags;
+          const add = this.vault.spellTags(tagsArg(args, 'add'), incoming ? undefined : ref);
+          const remove = tagsArg(args, 'remove');
+          const next = changeTags(current, add, remove);
+          if (next.join('\n') === current.join('\n')) throw new ToolError('Nothing would change.');
+          if (next.length > MAX_PAPER_TAGS) throw new ToolError(`A paper can have at most ${MAX_PAPER_TAGS} tags, and this would make ${next.length}.`);
+          return {
+            args: defined({ paper: ref, add: add.length ? add : undefined, remove: remove.length ? remove : undefined }),
+            summary: t('修改标签：{title}', { title }),
+            details: [{ label: t('标签'), before: current.join(', '), value: next.join(', ') || t('（空）') }],
+          };
+        },
+        run: (args) => {
+          const { id } = this.resolveOwnerPaper(args.paper as string);
+          const tags = changeTags(this.vault.getPaper(id).tags, (args.add as string[] | undefined) ?? [], (args.remove as string[] | undefined) ?? []);
+          const updated = this.vault.updatePaper(id, { tags });
+          this.deps.jobs.send({ type: 'library' });
+          return { result: JSON.stringify({ id, tags: updated.tags }), target: { ownerId: id } };
         },
       },
 

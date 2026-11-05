@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { extractPdf, pageMarkedText } from '../src/server/pdf';
-import { NotFound, Vault, newOutputId } from '../src/server/vault';
+import { BadRequest, NotFound, Vault, newOutputId } from '../src/server/vault';
+import { MAX_PAPER_TAGS, MAX_TAG_CHARS, changeTags, normalizeTags } from '../src/shared/types';
 
 const fixture = (name: string) => readFileSync(join(__dirname, 'fixtures', name));
 
@@ -22,6 +23,57 @@ describe('extractPdf', () => {
     const result = await extractPdf(new Uint8Array(fixture('cpn-zh.pdf')));
     expect(result.pages[0]).toContain('基于级联剪枝');
     expect(result.title).toBe('基于级联剪枝的重排序加速方法研究');
+  });
+});
+
+describe('tags', () => {
+  let root: string;
+  let vault: Vault;
+  let first: string;
+  let second: string;
+
+  beforeEach(async () => {
+    root = mkdtempSync(join(tmpdir(), 'wenqu-tags-'));
+    vault = new Vault(root);
+    first = (await vault.importPdf(fixture('cpn.pdf'), 'cpn.pdf')).meta.id;
+    second = (await vault.importPdf(fixture('cpn-zh.pdf'), 'cpn-zh.pdf')).meta.id;
+  });
+
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  it('tidies what it is given', () => {
+    expect(normalizeTags(['  #NLP ', 'nlp', 'a  b', '', 7, 'x'.repeat(MAX_TAG_CHARS + 1)])).toEqual(['NLP', 'a b']);
+    expect(normalizeTags('NLP')).toEqual([]);
+  });
+
+  it('adds and removes without caring about case', () => {
+    expect(changeTags(['NLP', 'CV'], ['RL', 'cv'], ['nlp'])).toEqual(['CV', 'RL']);
+  });
+
+  it('treats a paper from before tags existed as having none', () => {
+    const file = join(vault.paperDir(first), 'meta.json');
+    const { tags: _tags, ...old } = JSON.parse(readFileSync(file, 'utf8'));
+    writeFileSync(file, JSON.stringify(old));
+    expect(vault.getPaper(first).tags).toEqual([]);
+    expect(vault.updatePaper(first, { title: 'Renamed' }).tags).toEqual([]);
+  });
+
+  it('uses the spelling already in the library', () => {
+    vault.updatePaper(first, { tags: ['LLM'] });
+    expect(vault.updatePaper(second, { tags: ['llm', 'pruning'] }).tags).toEqual(['LLM', 'pruning']);
+    expect(vault.listTags()).toEqual([{ tag: 'LLM', count: 2 }, { tag: 'pruning', count: 1 }]);
+  });
+
+  it('lets the only paper with a tag change how it is spelled', () => {
+    vault.updatePaper(first, { tags: ['llm'] });
+    expect(vault.updatePaper(first, { tags: ['LLM'] }).tags).toEqual(['LLM']);
+  });
+
+  it('keeps what fits when adding, and refuses too many when setting', () => {
+    const many = Array.from({ length: MAX_PAPER_TAGS }, (_, i) => `tag ${i}`);
+    expect(vault.addTags(first, many).tags).toHaveLength(MAX_PAPER_TAGS);
+    expect(vault.addTags(first, ['one more']).tags).toEqual(many);
+    expect(() => vault.updatePaper(first, { tags: [...many, 'one more'] })).toThrow(BadRequest);
   });
 });
 

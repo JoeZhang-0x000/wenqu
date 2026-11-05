@@ -2,7 +2,9 @@ import { Check, CircleAlert, FileUp, Link2, Loader2, Upload, X } from 'lucide-re
 import { useEffect, useRef, useState } from 'react';
 import { t } from '../../src/shared/i18n';
 import type { ArxivLookup, PaperSummary } from '../../src/shared/types';
-import { api, bumpLibrary, createStore, fail, paperHref, toast, useStore } from './lib';
+import { api, bumpLibrary, createStore, fail, paperHref, settingsStore, toast, useStore } from './lib';
+import { save } from './Settings';
+import { Switch } from './ui';
 
 type Tab = 'file' | 'link';
 
@@ -51,6 +53,8 @@ async function runImport(name: string, request: () => Promise<{ paper: PaperSumm
   bumpLibrary();
 }
 
+const autoTag = () => settingsStore.get()?.library.autoTag ?? false;
+
 export async function importFiles(files: File[]) {
   const pdfs = files.filter((f) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'));
   if (!pdfs.length) {
@@ -58,7 +62,7 @@ export async function importFiles(files: File[]) {
     return;
   }
   for (const file of pdfs) {
-    await runImport(file.name, () => api(`/papers?filename=${encodeURIComponent(file.name)}`, { raw: file }));
+    await runImport(file.name, () => api(`/papers?filename=${encodeURIComponent(file.name)}${autoTag() ? '&autoTag=1' : ''}`, { raw: file }));
   }
 }
 
@@ -71,6 +75,7 @@ const splitLinks = (text: string) => [...new Set(text.split(/[\s,，]+/).filter(
 export function AddPaperDialog() {
   const open = useStore(addPaperStore);
   const items = useStore(importsStore);
+  const settings = useStore(settingsStore);
   // Held here so it survives switching tabs.
   const [linkText, setLinkText] = useState('');
   const close = () => {
@@ -105,6 +110,14 @@ export function AddPaperDialog() {
         </div>
         <div className="add-paper-body">
           {open.tab === 'file' ? <FilePane /> : <LinkPane text={linkText} setText={setLinkText} onOpenPaper={close} />}
+          <div className="add-paper-tags">
+            <Switch
+              checked={settings?.library.autoTag ?? false}
+              onChange={(autoTag) => save({ library: { autoTag } })}
+              label={t('添加论文时用 Agent 生成标签')}
+            />
+            <p className="muted small">{t('论文的标题、摘要和开头部分会发送给你选择的 Agent 服务。')}</p>
+          </div>
           {items.length > 0 && (
             <ul className="import-list">
               {items.map((item) => <ImportRow key={item.key} item={item} onOpen={close} />)}
@@ -208,7 +221,7 @@ function LinkPane({ text, setText, onOpenPaper }: { text: string; setText(text: 
     for (const lookup of addable) lookupCache.delete(lookup.input);
     void (async () => {
       for (const lookup of addable) {
-        await runImport(lookup.meta?.title ?? lookup.id!, () => api('/papers/arxiv', { body: { input: lookup.input } }));
+        await runImport(lookup.meta?.title ?? lookup.id!, () => api('/papers/arxiv', { body: { input: lookup.input, autoTag: autoTag() } }));
       }
     })();
   };

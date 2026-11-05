@@ -1,7 +1,7 @@
-import { AudioLines, Check, FileText, Layers, Link2, Plus, Search, Upload } from 'lucide-react';
+import { AudioLines, Check, FileText, Layers, Link2, Plus, Search, Tag, Upload } from 'lucide-react';
 import { getLocale, t } from '../../src/shared/i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { PaperSummary } from '../../src/shared/types';
+import { countTags, type PaperSummary } from '../../src/shared/types';
 import { openAddPaper } from './AddPaper';
 import { api, fail, paperHref, useFetch } from './lib';
 import { renderThumb } from './pdf';
@@ -26,12 +26,25 @@ const filters = (): { id: Filter; label: string }[] => [
   { id: 'none', label: t('未生成') },
 ];
 
+/** Enough to find the common ones without the row taking over the page. */
+const TAGS_SHOWN = 12;
+const TAGS_ON_CARD = 3;
+
 export function Library() {
   const { data: papers } = useFetch<PaperSummary[]>('/papers');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
+  const [chosenTags, setChosenTags] = useState<string[]>([]);
+  const [chosenUntagged, setChosenUntagged] = useState(false);
+  const [allTagsShown, setAllTagsShown] = useState(false);
   const [selected, setSelected] = useState<string[] | null>(null);
   const [collectionTitle, setCollectionTitle] = useState('');
+
+  const tagCounts = useMemo(() => countTags(papers ?? []), [papers]);
+  const untaggedCount = useMemo(() => (papers ?? []).filter((p) => !p.tags.length).length, [papers]);
+  // A tag can disappear while it is chosen, and shouldn't go on hiding papers with no chip left to turn it off.
+  const activeTags = useMemo(() => chosenTags.filter((tag) => tagCounts.some((c) => c.tag === tag)), [chosenTags, tagCounts]);
+  const untagged = chosenUntagged && untaggedCount > 0;
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -39,9 +52,18 @@ export function Library() {
       if (filter === 'blog' && !p.blogCount) return false;
       if (filter === 'podcast' && !p.podcastCount) return false;
       if (filter === 'none' && (p.blogCount || p.podcastCount)) return false;
-      return !q || `${p.title} ${p.authors.join(' ')} ${p.abstract ?? ''}`.toLowerCase().includes(q);
+      if (untagged && p.tags.length) return false;
+      if (!activeTags.every((tag) => p.tags.includes(tag))) return false;
+      return !q || `${p.title} ${p.authors.join(' ')} ${p.abstract ?? ''} ${p.tags.join(' ')}`.toLowerCase().includes(q);
     });
-  }, [papers, query, filter]);
+  }, [papers, query, filter, activeTags, untagged]);
+
+  const toggleTag = (tag: string) => {
+    setChosenUntagged(false);
+    setChosenTags(activeTags.includes(tag) ? activeTags.filter((other) => other !== tag) : [...activeTags, tag]);
+  };
+  // The ones in use stay in the row, wherever they rank.
+  const shownTags = allTagsShown ? tagCounts : tagCounts.filter((c, i) => i < TAGS_SHOWN || activeTags.includes(c.tag));
 
   if (papers && !papers.length) {
     return (
@@ -89,12 +111,41 @@ export function Library() {
           <button key={f.id} className={`chip ${filter === f.id ? 'on' : ''}`} onClick={() => setFilter(f.id)}>{f.label}</button>
         ))}
       </div>
+      {tagCounts.length > 0 && (
+        <div className="chips tag-filters" role="group" aria-label={t('按标签筛选')}>
+          <Tag size={13} aria-hidden />
+          {shownTags.map(({ tag, count }) => (
+            <button key={tag} className={`chip ${activeTags.includes(tag) ? 'on' : ''}`} aria-pressed={activeTags.includes(tag)} onClick={() => toggleTag(tag)}>
+              {tag}<span className="mono tag-count">{count}</span>
+            </button>
+          ))}
+          {untaggedCount > 0 && (
+            <button
+              className={`chip ${untagged ? 'on' : ''}`}
+              aria-pressed={untagged}
+              onClick={() => {
+                setChosenTags([]);
+                setChosenUntagged(!untagged);
+              }}
+            >
+              {t('无标签')}<span className="mono tag-count">{untaggedCount}</span>
+            </button>
+          )}
+          {tagCounts.length > TAGS_SHOWN && (
+            <button className="tag-more" onClick={() => setAllTagsShown(!allTagsShown)}>
+              {allTagsShown ? t('收起') : t('还有 {count} 个', { count: tagCounts.length - shownTags.length })}
+            </button>
+          )}
+        </div>
+      )}
       <div className="shelf">
         {visible.map((p) => (
           <PaperCard
             key={p.id}
             paper={p}
             selected={selected ? selected.includes(p.id) : undefined}
+            activeTags={activeTags}
+            onTag={toggleTag}
             onToggle={() => setSelected(selected?.includes(p.id) ? selected.filter((id) => id !== p.id) : [...(selected ?? []), p.id])}
           />
         ))}
@@ -160,7 +211,19 @@ export function PaperCover({ paper }: { paper: PaperSummary }) {
   );
 }
 
-function PaperCard({ paper, selected, onToggle }: { paper: PaperSummary; selected?: boolean; onToggle(): void }) {
+function PaperCard({
+  paper,
+  selected,
+  activeTags,
+  onTag,
+  onToggle,
+}: {
+  paper: PaperSummary;
+  selected?: boolean;
+  activeTags: string[];
+  onTag(tag: string): void;
+  onToggle(): void;
+}) {
   const selecting = selected !== undefined;
   return (
     <a
@@ -188,6 +251,26 @@ function PaperCard({ paper, selected, onToggle }: { paper: PaperSummary; selecte
         {paper.authors[0] && <span>{paper.authors[0]}{paper.authors.length > 1 ? t(' 等') : ''}</span>}
         {paper.year && <span className="mono">{paper.year}</span>}
       </div>
+      {paper.tags.length > 0 && (
+        <div className="card-tags">
+          {/* Inside a link, so these stay plain text for assistive tech. The row above the shelf does the same job by keyboard. */}
+          {paper.tags.slice(0, TAGS_ON_CARD).map((tag) => (
+            <span
+              key={tag}
+              className={`card-tag ${activeTags.includes(tag) ? 'on' : ''}`}
+              title={tag}
+              onClick={(e) => {
+                if (selecting) return;
+                e.preventDefault();
+                onTag(tag);
+              }}
+            >
+              {tag}
+            </span>
+          ))}
+          {paper.tags.length > TAGS_ON_CARD && <span className="card-tag-more" title={paper.tags.slice(TAGS_ON_CARD).join(', ')}>+{paper.tags.length - TAGS_ON_CARD}</span>}
+        </div>
+      )}
     </a>
   );
 }

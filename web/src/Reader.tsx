@@ -8,6 +8,7 @@ import { ChatPanel } from './ChatPanel';
 import { api, bumpLibrary, confirmAction, fail, jobsStore, paperHref, player, playerStore, settingsStore, toast, useFetch, useStore } from './lib';
 import { PdfViewer, type PdfHandle, type SelectionAsk } from './PdfViewer';
 import { PodcastPanel } from './PodcastPanel';
+import { PaperTags } from './Tags';
 
 type View = 'paper' | 'blog' | 'podcast';
 
@@ -105,12 +106,13 @@ export function Reader({
         )}
         <span className="muted small reader-authors">{paper.authors.slice(0, 3).join(', ')}{paper.authors.length > 3 ? t(' 等') : ''}</span>
         <div className="spacer" />
+        <PaperTags paper={paper} onChange={setData} />
         {paper.arxivId && (
           <a className="source-link mono" href={`https://arxiv.org/abs/${paper.arxivId}`} target="_blank" rel="noreferrer" title={t('在 arXiv 上打开')}>
             arXiv:{paper.arxivId}<ExternalLink size={11} />
           </a>
         )}
-        <button className="icon" title={t('在文件管理器中显示')} onClick={() => api(`/papers/${paperId}/reveal`, { method: 'POST' }).catch(fail)}>
+        <button className="icon reader-reveal" title={t('在文件管理器中显示')} onClick={() => api(`/papers/${paperId}/reveal`, { method: 'POST' }).catch(fail)}>
           <FolderOpen size={16} />
         </button>
         <button
