@@ -9,6 +9,7 @@ import {
   PODCAST_STYLES,
   SPEAKER_PAIRS,
   type AgentBackend,
+  type FontSize,
   type PublicSettings,
   type SettingsPatch,
   type UiLanguage,
@@ -102,6 +103,18 @@ function GeneralSection({ settings }: { settings: PublicSettings }) {
             { id: 'en', label: 'English' },
           ]}
           onChange={(uiLanguage) => save({ uiLanguage: uiLanguage as UiLanguage })}
+        />
+      </Field>
+      <Field label={t('字体大小')}>
+        <Select
+          value={settings.fontSize}
+          options={[
+            { id: 'small', label: t('小') },
+            { id: 'medium', label: t('中') },
+            { id: 'large', label: t('大') },
+            { id: 'xlarge', label: t('特大') },
+          ]}
+          onChange={(fontSize) => save({ fontSize: fontSize as FontSize })}
         />
       </Field>
       <Switch

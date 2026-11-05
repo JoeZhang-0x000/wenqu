@@ -1,7 +1,7 @@
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { AGENT_BACKENDS, SPEAKER_PAIRS, type AgentBackend, type PublicSettings, type Settings, type SettingsPatch } from '../shared/types.js';
+import { AGENT_BACKENDS, FONT_SIZES, SPEAKER_PAIRS, type AgentBackend, type PublicSettings, type Settings, type SettingsPatch } from '../shared/types.js';
 import { getLocale, t } from '../shared/i18n.js';
 import { DOUBAO_RESOURCE_ID } from './doubao.js';
 
@@ -30,6 +30,7 @@ export function defaultSettings(): Settings {
   return {
     vaultPath: defaultVaultPath(),
     uiLanguage: 'auto',
+    fontSize: 'medium',
     agent: { backend: 'claude', models: { pi: '', claude: '', codex: '', dsh: '' }, thinking: { pi: '', claude: '', codex: '', dsh: '' } },
     podcast: {
       language: getLocale(),
@@ -53,6 +54,7 @@ function merge(base: Settings, patch: SettingsPatch): Settings {
   return {
     vaultPath: patch.vaultPath ?? base.vaultPath,
     uiLanguage: patch.uiLanguage ?? base.uiLanguage,
+    fontSize: patch.fontSize ?? base.fontSize,
     agent: {
       ...base.agent,
       ...patch.agent,
@@ -117,6 +119,7 @@ export class Config {
     if (patch.agent?.backend && !AGENT_BACKENDS.includes(patch.agent.backend as AgentBackend)) {
       throw new Error(t('未知的 Agent 后端：{backend}', { backend: patch.agent.backend }));
     }
+    if (patch.fontSize && !FONT_SIZES.includes(patch.fontSize)) throw new Error(t('未知的字体大小：{size}', { size: patch.fontSize }));
     this.settings = merge(this.settings, patch);
     if (patch.vaultPath) this.vaultOverride = undefined;
     this.save();

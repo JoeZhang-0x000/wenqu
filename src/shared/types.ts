@@ -1,6 +1,9 @@
 export type AgentBackend = 'pi' | 'claude' | 'codex' | 'dsh';
 export const AGENT_BACKENDS: AgentBackend[] = ['claude', 'codex', 'pi', 'dsh'];
 
+export type FontSize = 'small' | 'medium' | 'large' | 'xlarge';
+export const FONT_SIZES: FontSize[] = ['small', 'medium', 'large', 'xlarge'];
+
 export interface UpdateStatus {
   /** Commits on origin/main that this checkout doesn't have. */
   behind: number;
@@ -16,6 +19,7 @@ export type UiLanguage = 'auto' | 'zh' | 'en';
 export interface Settings {
   vaultPath: string;
   uiLanguage: UiLanguage;
+  fontSize: FontSize;
   agent: {
     backend: AgentBackend;
     /** Empty string means the CLI's own default model. */
@@ -66,6 +70,7 @@ export interface PublicSettings extends Omit<Settings, 'doubao'> {
 export interface SettingsPatch {
   vaultPath?: string;
   uiLanguage?: UiLanguage;
+  fontSize?: FontSize;
   agent?: Partial<Settings['agent']>;
   podcast?: Partial<Settings['podcast']>;
   blog?: Partial<Settings['blog']>;
