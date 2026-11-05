@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { countTags, type PaperSummary } from '../../src/shared/types';
 import { openAddPaper } from './AddPaper';
 import { api, fail, paperHref, useFetch } from './lib';
-import { renderThumb } from './pdf';
+import { coverUrl, requestCover } from './cover';
 
 const VERSE = '问渠哪得清如许？为有源头活水来。';
 
@@ -177,32 +177,28 @@ export function Library() {
   );
 }
 
-/** A paper's first page. The image is rendered once in the browser, then kept in the vault. */
+/** A paper's first figure, or a page. The image is made once in the browser, then kept in the vault. */
 export function PaperCover({ paper }: { paper: PaperSummary }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [src, setSrc] = useState<string | undefined>(paper.hasThumb ? `/api/papers/${paper.id}/thumb` : undefined);
+  const [updated, setUpdated] = useState<string>();
+  const src = updated ?? coverUrl(paper);
 
   useEffect(() => {
-    if (paper.hasThumb || !ref.current) return;
-    let alive = true;
+    if (!paper.coverStale || !ref.current) return;
+    let stop: (() => void) | undefined;
     const observer = new IntersectionObserver((entries) => {
-      if (!entries[0].isIntersecting) return;
-      observer.disconnect();
-      renderThumb(paper.id)
-        .then((blob) => {
-          if (alive) setSrc(URL.createObjectURL(blob));
-          return api(`/papers/${paper.id}/thumb`, { method: 'PUT', raw: blob });
-        })
-        .catch(() => {
-          /* The card simply has no cover. */
-        });
+      if (entries[entries.length - 1].isIntersecting) stop ??= requestCover(paper.id, setUpdated);
+      else {
+        stop?.();
+        stop = undefined;
+      }
     });
     observer.observe(ref.current);
     return () => {
-      alive = false;
       observer.disconnect();
+      stop?.();
     };
-  }, [paper.id, paper.hasThumb]);
+  }, [paper.id, paper.coverStale]);
 
   return (
     <div className="cover" ref={ref}>

@@ -11,6 +11,7 @@ import {
 } from 'node:fs';
 import { basename, join } from 'node:path';
 import { t } from '../shared/i18n.js';
+import { COVER_VERSION, type CoverMarker } from './cover.js';
 import {
   AGENT_BACKENDS,
   COLLECTION_ID_PREFIX,
@@ -78,7 +79,7 @@ export function newOutputId(): string {
  * The vault is plain files, so it stays useful without this app:
  *
  *   <vault>/papers/<paper-id>/
- *     paper.pdf  meta.json  text.json  thumb.jpg
+ *     paper.pdf  meta.json  text.json  thumb.jpg  cover.json
  *     chats/<id>.json                   (one file per conversation)
  *     figures/fig-<n>.png, figures.json
  *     blogs/<id>.md                     (front matter + Markdown)
@@ -184,6 +185,8 @@ export class Vault {
     if (!existsSync(file)) throw new NotFound(t('论文不存在：{id}', { id }));
     const meta = readJson<PaperMeta>(file);
     const count = (name: string) => (existsSync(join(dir, name)) ? readdirSync(join(dir, name)).filter((f) => !f.startsWith('.')).length : 0);
+    const thumb = statSync(join(dir, 'thumb.jpg'), { throwIfNoEntry: false });
+    const cover = this.readCover(id);
     return {
       ...meta,
       id,
@@ -191,12 +194,15 @@ export class Vault {
       tags: normalizeTags(meta.tags),
       blogCount: count('blogs'),
       podcastCount: count('podcasts'),
-      hasThumb: existsSync(join(dir, 'thumb.jpg')),
+      hasThumb: Boolean(thumb),
+      thumbStamp: thumb ? Math.round(thumb.mtimeMs) : 0,
+      // A failure is settled too: there's no point in trying again on every view.
+      coverStale: cover?.version !== COVER_VERSION || (cover.kind !== 'failed' && !thumb),
     };
   }
 
   updatePaper(id: string, patch: Partial<Pick<PaperMeta, 'title' | 'authors' | 'year' | 'abstract' | 'tags'>>): PaperSummary {
-    const { blogCount: _b, podcastCount: _p, hasThumb: _t, ...meta } = this.getPaper(id);
+    const { blogCount: _b, podcastCount: _p, hasThumb: _t, thumbStamp: _s, coverStale: _c, ...meta } = this.getPaper(id);
     const next = { ...meta, ...patch, id };
     if (patch.tags) {
       next.tags = this.spellTags(normalizeTags(patch.tags), id);
@@ -245,6 +251,38 @@ export class Vault {
     const trash = join(this.root, '.trash');
     mkdirSync(trash, { recursive: true });
     renameSync(path, join(trash, `${new Date().toISOString().replace(/[:.]/g, '-')}-${name}`));
+  }
+
+  // Covers ------------------------------------------------------------------
+
+  /** A `thumb.jpg` without a readable marker is from before figures were used as covers. */
+  private readCover(id: string): CoverMarker | null {
+    try {
+      return readJson<CoverMarker>(join(this.paperDir(id), 'cover.json'));
+    } catch {
+      return null;
+    }
+  }
+
+  /** The old image stays in place until the new one is complete. Returns the new `thumbStamp`. */
+  writeCover(id: string, image: Buffer, kind: 'figure' | 'page', page: number): number {
+    const file = this.thumbPath(id);
+    const tmp = `${file}.${randomBytes(4).toString('hex')}.tmp`;
+    writeFileSync(tmp, image);
+    renameSync(tmp, file);
+    writeJson(join(this.paperDir(id), 'cover.json'), { version: COVER_VERSION, kind, page } satisfies CoverMarker);
+    return this.getPaper(id).thumbStamp;
+  }
+
+  /** Whatever the card shows now stays, and this version won't try again. */
+  settleCoverAsFailed(id: string): void {
+    writeJson(join(this.paperDir(id), 'cover.json'), { version: COVER_VERSION, kind: 'failed' } satisfies CoverMarker);
+  }
+
+  /** Has the cover chosen again on its next view, keeping the current image until then. */
+  invalidateCover(id: string): void {
+    const cover = this.readCover(id);
+    if (cover) writeJson(join(this.paperDir(id), 'cover.json'), { ...cover, version: 0 } satisfies CoverMarker);
   }
 
   // Figures -----------------------------------------------------------------

@@ -172,6 +172,7 @@ The vault lives in `~/Wenqu` by default. Its contents remain usable without this
     paper.pdf
     meta.json         Title, authors, tags and so on; safe to edit by hand
     text.json         Extracted text, page by page
+    thumb.jpg         Cover image, with cover.json recording how it was chosen
     chats/<id>.json   One file per conversation
     figures/          Extracted figures
     blogs/<id>.md     Front matter + Markdown, with figures as relative paths
@@ -225,7 +226,7 @@ If you find a security issue, please contact the maintainers privately instead o
 - **Figures:**
   - Only captions in the style of `Figure N:` are detected, and tables aren't extracted. You can remove a bad crop in the blog form.
   - Agents can't see the images, so they choose and describe figures from their captions alone.
-  - Extraction relies on the optional `@napi-rs/canvas` package. Where it isn't supported, blog posts have no figures.
+  - Extraction relies on the optional `@napi-rs/canvas` package. Where it isn't supported, blog posts have no figures, and a paper's cover is the whole page holding its first figure rather than a crop.
 - **Collections:** agent scripts only, with no chat.
 - **Assistant:** finds and adds papers on arXiv only, can't add local PDFs itself, and has no notion of citations between papers, so "related" comes from keyword search. Each step starts its CLI again, so long conversations are slow and use more of your agent quota.
 
