@@ -3,6 +3,7 @@ import { t } from '../../src/shared/i18n';
 import katex from 'katex';
 import { marked } from 'marked';
 import { memo, useMemo } from 'react';
+import { readRepoRef, replaceCodeCitations, type RepoRef } from '../../src/shared/repo';
 
 const CODE = /(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g;
 const BLOCK_MATH = /\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]/g;
@@ -19,7 +20,10 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
 const escapeHtml = (text: string) =>
   text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-export function renderMarkdown(source: string, ownerId?: string): string {
+/** `repo` is what code citations point at. Without one they stay plain text. */
+export function renderMarkdown(source: string, ownerId?: string, repo?: RepoRef): string {
+  // A message's repository comes from a file that can be edited by hand, so it's checked here too.
+  const codeRepo = readRepoRef(repo);
   const stashed: string[] = [];
   const hold = (html: string) => {
     stashed.push(html);
@@ -33,13 +37,19 @@ export function renderMarkdown(source: string, ownerId?: string): string {
       `<span class="fig"><img src="/api/papers/${paperId ?? ownerId}/figures/${file}" alt="${text}" loading="lazy" /><span class="fig-cap">${text}</span></span>`,
     );
   };
-  // Figures and math are pulled out first, so Markdown doesn't mangle what's inside them.
-  const prepared = source
+  const citeCode = (text: string) =>
+    codeRepo
+      ? replaceCodeCitations(text, codeRepo, ({ url, label }) => hold(`<a class="code-cite" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`))
+      : text;
+  // Models tend to write a path in backticks, even when told not to.
+  const unwrapped = codeRepo ? source.replace(/`(\[code:[^`\n]*\])`/g, '$1') : source;
+  // Figures, math and code citations are pulled out first, so Markdown doesn't mangle what's inside them.
+  const prepared = unwrapped
     .split(CODE)
     .map((part, i) =>
       i % 2 === 1
         ? part
-        : part
+        : citeCode(part)
             .replace(VAULT_FIGURE, (_, alt, paperId, file) => figure(alt, paperId, file))
             .replace(BLOCK_MATH, (_, a, b) => `\n\n${stash(a ?? b, true)}\n\n`)
             .replace(INLINE_MATH, (_, a, b) => stash(a ?? b, false))
@@ -66,6 +76,7 @@ export const Markdown = memo(function Markdown({
   onCite,
   className = '',
   ownerId,
+  repo,
 }: {
   source: string;
   /** `ref` is the paper number in a collection's citation, such as 2 in [2:p.5]. */
@@ -73,8 +84,10 @@ export const Markdown = memo(function Markdown({
   className?: string;
   /** The paper or collection this text belongs to, for resolving its figures. */
   ownerId?: string;
+  /** The repository and commit this text's code citations point at. */
+  repo?: RepoRef;
 }) {
-  const html = useMemo(() => renderMarkdown(source, ownerId), [source, ownerId]);
+  const html = useMemo(() => renderMarkdown(source, ownerId, repo), [source, ownerId, repo?.owner, repo?.name, repo?.sha]);
   return (
     <div
       className={`prose ${className}`}

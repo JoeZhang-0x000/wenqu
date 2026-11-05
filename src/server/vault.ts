@@ -11,6 +11,7 @@ import {
 } from 'node:fs';
 import { basename, join } from 'node:path';
 import { t } from '../shared/i18n.js';
+import { readPaperRepo, type PaperRepo } from '../shared/repo.js';
 import { COVER_VERSION, type CoverMarker } from './cover.js';
 import {
   AGENT_BACKENDS,
@@ -36,6 +37,7 @@ import {
   type TagCount,
 } from '../shared/types.js';
 import { extractPdf } from './pdf.js';
+import type { PdfLink } from './repo-detect.js';
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,120}$/;
 
@@ -80,6 +82,7 @@ export function newOutputId(): string {
  *
  *   <vault>/papers/<paper-id>/
  *     paper.pdf  meta.json  text.json  thumb.jpg  cover.json
+ *     repo-links.json                   (GitHub links read from the PDF, a cache)
  *     chats/<id>.json                   (one file per conversation)
  *     figures/fig-<n>.png, figures.json
  *     blogs/<id>.md                     (front matter + Markdown)
@@ -192,6 +195,8 @@ export class Vault {
       id,
       // Papers from before tags existed have none, and this file can be edited by hand.
       tags: normalizeTags(meta.tags),
+      // The same goes for a link, which ends up in git's arguments and on disk.
+      repo: readPaperRepo(meta.repo),
       blogCount: count('blogs'),
       podcastCount: count('podcasts'),
       hasThumb: Boolean(thumb),
@@ -201,15 +206,44 @@ export class Vault {
     };
   }
 
-  updatePaper(id: string, patch: Partial<Pick<PaperMeta, 'title' | 'authors' | 'year' | 'abstract' | 'tags'>>): PaperSummary {
+  /** A paper as `meta.json` holds it, without the fields worked out on reading. */
+  private storedMeta(id: string): PaperMeta {
     const { blogCount: _b, podcastCount: _p, hasThumb: _t, thumbStamp: _s, coverStale: _c, ...meta } = this.getPaper(id);
-    const next = { ...meta, ...patch, id };
+    return meta;
+  }
+
+  updatePaper(id: string, patch: Partial<Pick<PaperMeta, 'title' | 'authors' | 'year' | 'abstract' | 'tags'>>): PaperSummary {
+    const meta = this.storedMeta(id);
+    // A link only changes through setPaperRepo, whatever a caller's patch happens to hold.
+    const next = { ...meta, ...patch, id, repo: meta.repo };
     if (patch.tags) {
       next.tags = this.spellTags(normalizeTags(patch.tags), id);
       if (next.tags.length > MAX_PAPER_TAGS) throw new BadRequest(t('一篇论文最多 {count} 个标签', { count: MAX_PAPER_TAGS }));
     }
     writeJson(join(this.paperDir(id), 'meta.json'), next);
     return this.getPaper(id);
+  }
+
+  /** Links a repository, or removes the link when given nothing. */
+  setPaperRepo(id: string, repo: PaperRepo | undefined): PaperSummary {
+    writeJson(join(this.paperDir(id), 'meta.json'), { ...this.storedMeta(id), repo: readPaperRepo(repo) });
+    return this.getPaper(id);
+  }
+
+  /** The cached links, or null if the PDF hasn't been read with this `version`. */
+  readRepoLinks(id: string, version: number): PdfLink[] | null {
+    const file = join(this.paperDir(id), 'repo-links.json');
+    if (!existsSync(file)) return null;
+    try {
+      const cached = readJson<{ version: number; links: PdfLink[] }>(file);
+      return cached.version === version && Array.isArray(cached.links) ? cached.links : null;
+    } catch {
+      return null;
+    }
+  }
+
+  writeRepoLinks(id: string, version: number, links: PdfLink[]): void {
+    writeJson(join(this.paperDir(id), 'repo-links.json'), { version, links });
   }
 
   listTags(): TagCount[] {

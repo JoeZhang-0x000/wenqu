@@ -87,8 +87,8 @@ export function connectEvents(onJob: (previous: Job | undefined, job: Job, live:
       const previous = jobsStore.get()[event.job.id];
       jobsStore.set({ ...jobsStore.get(), [event.job.id]: event.job });
       onJob(previous, event.job, true);
-      // Tagging has no panel of its own that could show this.
-      if (event.job.kind === 'tags' && event.job.status === 'failed') toast(`${event.job.label}：${event.job.error}`, 'error');
+      // These have no panel of their own that is sure to be showing this.
+      if ((event.job.kind === 'tags' || event.job.kind === 'repo') && event.job.status === 'failed') toast(`${event.job.label}：${event.job.error}`, 'error');
     }
     else if (event.type === 'delta') {
       const job = jobsStore.get()[event.jobId];
