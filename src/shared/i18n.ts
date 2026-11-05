@@ -5,6 +5,7 @@
  */
 const en = {
   // Chat panel
+  接下来可以问: 'What you could ask next',
   思考强度: 'Thinking level',
   默认强度: 'Default level',
   '思考强度无效：{level}': 'Invalid thinking level: {level}',

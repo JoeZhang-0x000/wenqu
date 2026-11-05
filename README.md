@@ -70,6 +70,8 @@ PDFs are rendered by pdf.js, with search, zoom and a night mode. Math is display
 
 Conversations are kept per paper. Open the history to return to an earlier one or delete it. An existing single conversation from an earlier version becomes a session automatically.
 
+After an answer, the agent can offer a few follow-up questions as buttons under it. Clicking one sends it as your next message. They come from the same reply, so they cost no extra model call.
+
 ![A floating chat panel over the paper, starting a new chat with a choice of harness, model and thinking level](docs/images/chat-float.png)
 
 | | When you can change it | Where the options come from |
@@ -136,6 +138,8 @@ Nothing happens to your library without you. Each request shows up as a card wri
 | Search arXiv | Not needed, because it changes nothing |
 
 Results from an arXiv search can also be added with their own **Add** button. The assistant can add papers from arXiv only, so use **Add paper** for local PDFs. To stop a batch, press stop in the chat, which also stops any generation it started.
+
+When a turn is finished and nothing is waiting for approval, the assistant can offer a few next steps as buttons under its reply. Clicking one sends it as your next message and nothing more, so any change it leads to still needs your approval.
 
 ## Command line
 

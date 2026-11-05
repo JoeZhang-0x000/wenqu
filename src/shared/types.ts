@@ -349,6 +349,8 @@ export interface ChatMessage {
   page?: number;
   agent?: string;
   error?: boolean;
+  /** What the user might send next, from this reply. Never part of `content`. */
+  suggestions?: string[];
   at: string;
 }
 
@@ -397,6 +399,8 @@ export interface AssistantMessage {
   actions?: AssistantAction[];
   agent?: string;
   error?: boolean;
+  /** What the user might send next, from a turn's final reply. Never part of `content`. */
+  suggestions?: string[];
   at: string;
 }
 

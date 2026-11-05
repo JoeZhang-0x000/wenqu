@@ -490,6 +490,7 @@ input[type='range'] { width: 100%; accent-color: var(--signal); }
 .chat-empty { margin: auto 0; padding: 16px 4px; }
 .chat-empty .serif { font-size: 1.3125rem; margin-bottom: 4px; }
 .chat-empty .chips { margin-top: 14px; }
+.next-steps .chip { border-radius: 13px; overflow-wrap: anywhere; }
 .msg.user { align-self: flex-end; max-width: 88%; padding: 7px 12px; border-radius: 12px 12px 3px 12px; background: var(--paper-3); }
 .msg.ai { align-self: stretch; }
 .msg.err { color: var(--bad); }
