@@ -10,6 +10,8 @@ const CJK = /[㐀-鿿]/;
 const ALLOWED: Record<string, RegExp[]> = {
   'figures.ts': [/const CAPTION =/, /u3400|㐀/],
   'pdf.ts': [/test\(|abstract/i],
+  // Patterns for reading Chinese papers.
+  'repo-detect.ts': [/开源|基于|参考文献|㐀/],
   'script.ts': [/const (SPEAKER|TITLE)_LINE =/],
   // Spoken by a Chinese voice during the connection test.
   'server.ts': [/nlp_texts/],

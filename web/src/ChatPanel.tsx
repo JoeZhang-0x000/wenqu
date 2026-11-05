@@ -1,11 +1,13 @@
 import { ArrowUp, History, MessageSquare, Plus, Square, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { latestSuggestions, visibleAnswer } from '../../src/shared/assistant';
+import { latestSuggestions, visibleAnswer, visibleRepoReply } from '../../src/shared/assistant';
 import { t } from '../../src/shared/i18n';
-import type { AgentBackend, AgentStatus, ChatMessage, ChatSession, ChatSessionMeta, Job } from '../../src/shared/types';
+import { blobUrl, isRepoPath, readRepoRef, repoLabel, shortSha } from '../../src/shared/repo';
+import type { AgentBackend, AgentStatus, ChatMessage, ChatSession, ChatSessionMeta, Job, RepoState } from '../../src/shared/types';
 import { agentsStore, api, bumpLibrary, confirmAction, fail, formatDate, jobsStore, loadAgents, settingsStore, useFetch, useStore } from './lib';
 import { Markdown } from './Markdown';
 import type { SelectionAsk } from './PdfViewer';
+import { RepoLink } from './RepoLink';
 import { MessageChips } from './ui';
 
 const starters = () => [t('一句话总结这篇论文'), t('核心贡献是什么？'), t('方法的关键步骤是什么？'), t('有哪些局限和未解决的问题？')];
@@ -48,7 +50,10 @@ export function ChatPanel({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const handledAsk = useRef<number>(0);
   const messages = sessionId && session?.id === sessionId ? session.messages : [];
-  const streamed = running ? visibleAnswer(running.text) : '';
+  // A chat reading a repository streams tool blocks too, which aren't for showing.
+  const streamed = running ? (running.tools ? visibleRepoReply : visibleAnswer)(running.text) : '';
+  const { data: repoState, setData: setRepoState } = useFetch<RepoState>(`/papers/${paperId}/repo`);
+  const repoInUse = repoState?.link?.enabled ? repoState.link : undefined;
   /** The reply already answered, until the session catches up with the new message. */
   const [answered, setAnswered] = useState<string>();
   const suggestions = latestSuggestions(messages, Boolean(running) || answered === messages.at(-1)?.at);
@@ -147,6 +152,12 @@ export function ChatPanel({
           <History size={15} />
         </button>
         <span className="chat-title" title={title}>{showHistory ? t('历史会话') : title}</span>
+        <RepoLink
+          paperId={paperId}
+          state={repoState}
+          busy={runningJobs.length > 0}
+          onLinkChange={(link) => setRepoState((current) => (current ? { ...current, link } : current))}
+        />
         {sessionId && !showHistory && harness && <span className="agent-pill mono" title={t('会话创建后不能更换 Harness')}>{harness}</span>}
         <button className="icon" title={t('新建会话')} onClick={startNew}><Plus size={15} /></button>
       </div>
@@ -181,7 +192,7 @@ export function ChatPanel({
             <div className="chat-empty">
               <p className="serif">{t('读到哪里，问到哪里。')}</p>
               <p className="muted">{t('回答基于全文并标注页码，点击页码可跳转。也可以在左侧选中一段文字直接提问。')}</p>
-              <MessageChips items={starters()} onPick={(s) => send(s, null, true)} />
+              <MessageChips items={repoInUse ? [...starters(), t('代码是怎么实现论文方法的？')] : starters()} onPick={(s) => send(s, null, true)} />
             </div>
           )}
           {messages.map((m, i) =>
@@ -196,14 +207,20 @@ export function ChatPanel({
               </div>
             ) : (
               <div className={`msg ai ${m.error ? 'err' : ''}`} key={i}>
-                {m.error ? <p>{m.content}</p> : <Markdown source={m.content} onCite={onCite} />}
-                {m.agent && <div className="msg-agent mono">{m.agent}</div>}
+                {m.error ? <p>{m.content}</p> : <Markdown source={m.content} onCite={onCite} repo={m.repo} />}
+                {m.notice && <p className="msg-notice small">{m.notice}</p>}
+                <FilesRead message={m} />
+                {m.agent && <div className="msg-agent mono">{m.agent}{m.repo && ` · ${repoLabel(m.repo)} @ ${shortSha(m.repo.sha)}`}</div>}
               </div>
             ),
           )}
           {running && (
             <div className="msg ai">
-              {streamed ? <Markdown source={streamed} onCite={onCite} /> : <Thinking text={t('{agent} 正在阅读论文', { agent: harness ?? 'AI' })} />}
+              {streamed ? (
+                <Markdown source={streamed} onCite={onCite} repo={running.tools ? repoInUse : undefined} />
+              ) : (
+                <Thinking text={running.progress?.note ?? t('{agent} 正在阅读论文', { agent: harness ?? 'AI' })} />
+              )}
             </div>
           )}
           <MessageChips className="next-steps" label={t('接下来可以问')} items={suggestions} onPick={(s) => send(s, null, true)} />
@@ -272,6 +289,25 @@ export function ChatPanel({
         </div>
       </div>
     </div>
+  );
+}
+
+/** Where an answer came from, out of the way until it's wanted. */
+function FilesRead({ message }: { message: ChatMessage }) {
+  const repo = readRepoRef(message.repo);
+  const files = message.filesRead?.filter(isRepoPath) ?? [];
+  if (!repo || !files.length) return null;
+  return (
+    <details className="msg-files">
+      <summary>{t('读取了 {count} 个文件', { count: files.length })}</summary>
+      <ul>
+        {files.map((path) => (
+          <li key={path}>
+            <a className="mono" href={blobUrl(repo, path)} target="_blank" rel="noopener noreferrer">{path}</a>
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 

@@ -70,6 +70,29 @@ export function visibleAnswer(raw: string): string {
   return withoutBlocks(raw, ANSWER_TAGS);
 }
 
+/**
+ * Models sometimes write out what they expect a tool to return, and carry on as if it had.
+ * Only a closed block counts, so an answer can still mention such a tag in passing.
+ */
+const IMAGINED_RESULTS = /<tool_results?\b[\s\S]*?<\/tool_results?>/g;
+
+export const withoutImaginedResults = (raw: string) => raw.replace(IMAGINED_RESULTS, '');
+
+/**
+ * Some models garble the tag's name, such as <tools>…</wenqu_tools>. Only a pair is taken for
+ * a block, so an answer can mention <tools> without hiding the rest of itself.
+ */
+export function withRepairedTags(raw: string): string {
+  return raw
+    .replace(/<(?:wenqu_)?tools>([\s\S]*?)<\/(?:wenqu_)?tools>/g, `<${TOOL_TAG}>$1</${TOOL_TAG}>`)
+    .replace(/<(?:wenqu_)?suggestions>([\s\S]*?)<\/(?:wenqu_)?suggestions>/g, `<${SUGGESTION_TAG}>$1</${SUGGESTION_TAG}>`);
+}
+
+/** What a reader chat that can read a repository shows of a reply. */
+export function visibleRepoReply(raw: string): string {
+  return visibleReply(withRepairedTags(withoutImaginedResults(raw)));
+}
+
 const MAX_SUGGESTIONS = 3;
 const MAX_SUGGESTION_CHARS = 60;
 

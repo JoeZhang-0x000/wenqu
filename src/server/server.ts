@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { parseAnswer } from '../shared/assistant.js';
 import { getLocale, setLocale, t } from '../shared/i18n.js';
+import { parseRepoUrl, repoLabel, shortSha, type PaperRepo, type RepoRef } from '../shared/repo.js';
 import {
   AGENT_BACKENDS,
   MAX_ROUND_CHARS,
@@ -19,6 +20,7 @@ import {
   type PaperFigure,
   type PaperSummary,
   type Podcast,
+  type RepoState,
   type ScriptRound,
   type ServerEvent,
   type SettingsPatch,
@@ -27,13 +29,16 @@ import { runAgent } from './agents.js';
 import { detectAgents } from './harness.js';
 import { applyUpdate, updateStatus } from './update.js';
 import { importArxiv, lookupArxiv, searchArxiv } from './arxiv.js';
-import { Config, expandHome } from './config.js';
+import { Config, expandHome, repoCacheDir } from './config.js';
 import { chooseCover, locateFirstFigurePage } from './cover.js';
 import { DoubaoError, synthesizePodcast } from './doubao.js';
 import { FIGURES_VERSION, byPosition, extractFigures, figurePath, figuresSupported, inlineFigures, keepKnownFigures } from './figures.js';
-import { Jobs } from './jobs.js';
+import { Jobs, type JobContext } from './jobs.js';
 import { PDFJS_DIR, pageMarkedText } from './pdf.js';
 import { blogPrompt, chatPrompt, collectionSource, paperSource, parseTagReply, scriptPrompt, tagsPrompt, type SourceFigure } from './prompts.js';
+import { RepoStore, type RepoStoreOptions } from './repo.js';
+import { answerWithRepo } from './repo-chat.js';
+import { REPO_LINKS_VERSION, rankRepoCandidates, readPdfLinks, type PdfLink } from './repo-detect.js';
 import { parseScript } from './script.js';
 import { Assistant } from './assistant.js';
 import { BadRequest, NotFound, Vault, newOutputId } from './vault.js';
@@ -63,13 +68,16 @@ export interface AppOptions {
   devOrigin?: string;
   /** Replaces this process with the current build. Missing where that isn't possible, as in the dev server. */
   restart?: () => void;
+  /** Changes how repositories are fetched, so that tests never touch the network. */
+  repos?: Pick<RepoStoreOptions, 'cloneUrl' | 'protocols' | 'maxBytes' | 'timeoutMs'>;
 }
 
-export function createApp({ config, devOrigin, restart }: AppOptions) {
+export function createApp({ config, devOrigin, restart, repos: repoOptions }: AppOptions) {
   const app = express();
   app.disable('x-powered-by');
   const jobs = new Jobs();
   let vault = new Vault(config.get().vaultPath);
+  const repos = new RepoStore({ root: repoCacheDir(), ...repoOptions });
 
   /**
    * This server can spawn agents and read the vault, and any website can reach
@@ -259,7 +267,9 @@ export function createApp({ config, devOrigin, restart }: AppOptions) {
     res.json(paper);
   });
   api.delete('/papers/:id', (req, res) => {
+    const link = vault.getPaper(req.params.id).repo;
     vault.trashPaper(req.params.id);
+    if (link) releaseClones(link);
     jobs.send({ type: 'library' });
     res.json({ ok: true });
   });
@@ -787,6 +797,112 @@ export function createApp({ config, devOrigin, restart }: AppOptions) {
     sendFile(res, file, 'audio/mpeg');
   });
 
+  // Linked repositories -----------------------------------------------------
+
+  /** Reading a PDF's link annotations takes a moment, so it's done once. Requests in the meantime share it. */
+  const readingLinks = new Map<string, Promise<PdfLink[]>>();
+
+  const repoLinksOf = (paperId: string): Promise<PdfLink[]> => {
+    const cached = vault.readRepoLinks(paperId, REPO_LINKS_VERSION);
+    if (cached) return Promise.resolve(cached);
+    const running = readingLinks.get(paperId);
+    if (running) return running;
+    const owner = vault;
+    // Parsing a whole PDF holds up this thread, so it waits its turn with the other heavy PDF work.
+    const work = inTurn(() => readPdfLinks(new Uint8Array(readFileSync(owner.pdfPath(paperId)))))
+      .then((links) => {
+        owner.writeRepoLinks(paperId, REPO_LINKS_VERSION, links);
+        return links;
+      })
+      // A PDF that can't be read that way still has its text, so this isn't worth an error.
+      .catch((err: Error) => {
+        console.error(err);
+        return [];
+      })
+      .finally(() => readingLinks.delete(paperId));
+    readingLinks.set(paperId, work);
+    return work;
+  };
+
+  const repoJobId = (paperId: string) => `repo-${paperId}`;
+
+  /** Whichever commits of this repository papers in this vault still point at. */
+  const releaseClones = (repo: { owner: string; name: string }) => {
+    const same = (p: PaperSummary) => p.repo?.owner.toLowerCase() === repo.owner.toLowerCase() && p.repo?.name.toLowerCase() === repo.name.toLowerCase();
+    repos.release(repo, vault.listPapers().filter(same).map((p) => p.repo!.sha));
+  };
+
+  /** A clone can be missing, as on a new machine. Returns why it couldn't be restored, if it couldn't. */
+  const ensureClone = async (repo: PaperRepo, job: JobContext): Promise<string | undefined> => {
+    if (repos.has(repo)) return undefined;
+    job.progress({ done: 0, note: t('正在重新拉取 {repo}', { repo: repoLabel(repo) }) });
+    try {
+      await repos.restore(repo, { signal: job.signal });
+      return undefined;
+    } catch (err) {
+      job.signal.throwIfAborted();
+      return t('没能重新拉取 {repo} @ {sha}（{error}）。这次回答只依据论文。', { repo: repoLabel(repo), sha: shortSha(repo.sha), error: (err as Error).message });
+    }
+  };
+
+  const chatRunning = (paperId: string) => jobs.list().some((j) => j.kind === 'chat' && j.paperId === paperId && j.status === 'running');
+
+  /** Detecting only reads what's already on disk. Nothing touches the network until a link is asked for. */
+  api.get('/papers/:id/repo', async (req, res) => {
+    const paper = vault.getPaper(req.params.id);
+    const state: RepoState = {
+      link: paper.repo,
+      candidates: rankRepoCandidates({ title: paper.title, pages: vault.readPages(paper.id), links: await repoLinksOf(paper.id) }),
+    };
+    res.json(state);
+  });
+
+  /** Links a repository, or fetches a newer commit of the one already linked. */
+  api.post('/papers/:id/repo', json, (req, res) => {
+    const paperId = req.params.id;
+    vault.getPaper(paperId);
+    const parsed = parseRepoUrl(req.body?.url);
+    if (!parsed) throw new BadRequest(t('请输入这样的地址：https://github.com/<owner>/<repo>'));
+    if (jobs.isActive(repoJobId(paperId))) throw new BadRequest(t('正在关联仓库，请等它结束'));
+    if (chatRunning(paperId)) throw new BadRequest(t('这个会话正在回答，请等它结束'));
+    const label = repoLabel(parsed);
+    res.json(
+      jobs.start({ kind: 'repo', paperId, targetId: repoJobId(paperId), label: t('关联仓库：{repo}', { repo: label }) }, async (job) => {
+        job.progress({ done: 0, note: t('正在拉取 {repo}', { repo: label }) });
+        const pinned = await repos.clone(parsed, {
+          signal: job.signal,
+          onProgress: (percent) => job.progress({ done: percent, total: 100, note: t('正在拉取 {repo}', { repo: label }) }),
+        });
+        job.signal.throwIfAborted();
+        const previous = vault.getPaper(paperId).repo;
+        // Fetching a newer commit leaves the switch alone, while picking a repository means wanting to use it.
+        const same = previous && repoLabel(previous).toLowerCase() === label.toLowerCase();
+        vault.setPaperRepo(paperId, { ...pinned, enabled: same ? previous.enabled : true });
+        // A chat asked in the meantime may still be reading the old one.
+        if (previous && !chatRunning(paperId)) releaseClones(previous);
+      }),
+    );
+  });
+
+  api.patch('/papers/:id/repo', json, (req, res) => {
+    const link = vault.getPaper(req.params.id).repo;
+    if (!link) throw new NotFound(t('这篇论文还没有关联仓库'));
+    if (typeof req.body?.enabled !== 'boolean') throw new BadRequest(t('请求无效'));
+    res.json(vault.setPaperRepo(req.params.id, { ...link, enabled: req.body.enabled }));
+    jobs.send({ type: 'library' });
+  });
+
+  api.delete('/papers/:id/repo', (req, res) => {
+    const link = vault.getPaper(req.params.id).repo;
+    if (chatRunning(req.params.id)) throw new BadRequest(t('这个会话正在回答，请等它结束'));
+    if (link) {
+      vault.setPaperRepo(req.params.id, undefined);
+      releaseClones(link);
+    }
+    jobs.send({ type: 'library' });
+    res.json({ ok: true });
+  });
+
   // Chat --------------------------------------------------------------------
 
   const askInSession = (
@@ -808,28 +924,38 @@ export function createApp({ config, devOrigin, restart }: AppOptions) {
       at: new Date().toISOString(),
     };
     vault.appendChat(paperId, sessionId, user);
-    const finish = (content: string, error?: boolean, suggestions?: string[]) =>
+    const finish = (content: string, error?: boolean, suggestions?: string[], extra?: Pick<ChatMessage, 'repo' | 'filesRead' | 'notice'>) =>
       vault.appendChat(paperId, sessionId, {
         role: 'assistant',
         content,
         error,
         suggestions: suggestions?.length ? suggestions : undefined,
         agent: agentLabel(agent),
+        ...extra,
         at: new Date().toISOString(),
       });
+    const question = { ...ctx, history, question: user.content, selection: body.selection, page: body.page };
+    // With no repository in use, a question is one call and nothing here mentions tools.
+    const repo = ctx.meta.repo?.enabled ? ctx.meta.repo : undefined;
     const job = jobs.start(
-      { kind: 'chat', paperId, targetId: sessionId, label: t('问答：{title}', { title: user.content.slice(0, 40) }) },
-      async ({ signal, delta }) => {
-        const reply = await runAgent({
-          ...agent,
-          ...chatPrompt({ ...ctx, history, question: user.content, selection: body.selection, page: body.page }),
-          onDelta: delta,
-          signal,
-        });
+      { kind: 'chat', paperId, targetId: sessionId, label: t('问答：{title}', { title: user.content.slice(0, 40) }), ...(repo ? { tools: true } : {}) },
+      async (work) => {
+        const { signal, delta } = work;
+        let notice: string | undefined;
+        if (repo) {
+          notice = await ensureClone(repo, work);
+          if (!notice) {
+            const pinned: RepoRef = { owner: repo.owner, name: repo.name, sha: repo.sha };
+            const answer = await answerWithRepo({ ...question, repo: pinned }, { runAgent, agent, reader: repos.reader(pinned), ctx: work });
+            finish(answer.text, undefined, answer.suggestions, { repo: pinned, filesRead: answer.filesRead.length ? answer.filesRead : undefined });
+            return;
+          }
+        }
+        const reply = await runAgent({ ...agent, ...chatPrompt(question), onDelta: delta, signal });
         // The prompt quotes the paper, so only the reply itself may be read for suggestions.
         const { text, suggestions } = parseAnswer(reply);
         if (!text) throw new Error(t('{agent} 没有返回内容。{detail}', { agent: harness, detail: '' }));
-        finish(text, undefined, suggestions);
+        finish(text, undefined, suggestions, notice ? { notice } : undefined);
       },
       (error, canceled) => finish(canceled ? t('已取消') : error, true),
     );

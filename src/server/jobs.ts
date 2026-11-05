@@ -38,7 +38,7 @@ export class Jobs extends EventEmitter {
   }
 
   start(
-    init: { kind: JobKind; paperId: string; label: string; targetId?: string },
+    init: { kind: JobKind; paperId: string; label: string; targetId?: string; tools?: boolean },
     run: (ctx: JobContext) => Promise<void>,
     onFailure?: (message: string, canceled: boolean) => void | Promise<void>,
   ): Job {

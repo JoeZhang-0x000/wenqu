@@ -7,6 +7,8 @@ import { DOUBAO_RESOURCE_ID } from './doubao.js';
 
 const configDir = () => process.env.WENQU_CONFIG_DIR || join(homedir(), '.config', 'wenqu');
 const configFile = () => join(configDir(), 'config.json');
+/** Clones of linked repositories. They can be fetched again, so they stay out of the vault. */
+export const repoCacheDir = () => join(configDir(), 'repos');
 
 /** Settings from when the project was called Paper2Podcast are carried over once. The old file is left in place. */
 function adoptLegacyConfig(): void {

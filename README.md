@@ -84,6 +84,14 @@ Claude Code has no command for listing models, so only the aliases named in its 
 
 The agent settings choose what blog posts and podcast scripts use, and the defaults for new chats.
 
+#### Reading a paper's code
+
+The chat can read a GitHub repository linked to the paper, and compare what the paper says with what the code does.
+
+- **Finding one.** The branch button in the chat bar lists the repositories the paper mentions, from its text and from links hidden behind its text. Papers mention their dependencies and baselines more often than their own code, so the list is ordered by what looks most like this paper's code, and that ordering is only a guess. Check before relying on it. You can also paste any `https://github.com/<owner>/<repo>`.
+- **Linking.** Detecting only reads what's on your machine. Nothing touches the network until you click Link. The latest commit of the default branch is fetched in the background, which you can cancel, and the link records that commit. Fetch again to move to a newer one, or unlink to delete the clone once no other paper uses it.
+- **Asking.** With the switch on, the agent can list directories, read files and search the code at that commit. While it works, the chat shows what it's reading. Answers cite the paper as `[p.N]` and the code with links to those exact lines on GitHub, and they keep pointing at the commit they read. The files read are listed under the answer. With the switch off or no repository linked, the chat works exactly as it did before.
+
 ### Podcasts
 
 ![The script editor: edit each turn, switch hosts, and adjust speech rate and intro music](docs/images/script-editor.png)
@@ -178,9 +186,10 @@ The vault lives in `~/Wenqu` by default. Its contents remain usable without this
 <vault>/
   papers/<paper-id>/
     paper.pdf
-    meta.json         Title, authors, tags and so on; safe to edit by hand
+    meta.json         Title, authors, tags, linked repository and so on; safe to edit by hand
     text.json         Extracted text, page by page
     thumb.jpg         Cover image, with cover.json recording how it was chosen
+    repo-links.json   GitHub links read from the PDF, a cache
     chats/<id>.json   One file per conversation
     figures/          Extracted figures
     blogs/<id>.md     Front matter + Markdown, with figures as relative paths
@@ -193,6 +202,8 @@ The vault lives in `~/Wenqu` by default. Its contents remain usable without this
 ```
 
 Your API key is not stored in the vault, so syncing or sharing a vault does not expose it.
+
+Clones of linked repositories stay out of the vault too, in `~/.config/wenqu/repos`. If a clone is missing, as on a new machine, the recorded commit is fetched again the next time you ask. If that fails, the answer says so and uses the paper alone.
 
 The project was first called Paper2Podcast. Settings in `~/.config/paper2podcast` are copied over the first time Wenqu starts, and a vault at `~/Paper2Podcast` keeps being used. You can delete the old config folder afterwards.
 
@@ -212,13 +223,14 @@ flowchart LR
     H --> I
 ```
 
-Paper content is sent to the agent service you choose. When generating audio, the script or paper text is sent to Doubao. Everything else stays on your machine.
+Paper content is sent to the agent service you choose, and so are the parts of a linked repository the agent reads. When generating audio, the script or paper text is sent to Doubao. Everything else stays on your machine.
 
 ## Security
 
 - **Local only.** The server listens on `127.0.0.1` and rejects requests from other Hosts and Origins, so malicious websites can't reach it through your browser.
 - **Papers are untrusted data.** A PDF may contain prompt injection, so agents run in an empty temporary directory. Claude Code, pi and DeepSeek Harness have all tools disabled, and Codex uses a read-only sandbox. Codex has no option to disable tools completely, so it can still read local files, but it can't write to them and has no network access by default.
 - **The assistant can only ask.** Its agent has no tools either. It writes down what it wants to do, and the server checks the request, describes it to you from the app's own data, and runs only what you approve. A paper with hidden instructions can at most put a request in front of you, so read the card before approving. Your library's details go to the agent service without asking. Searching arXiv doesn't ask first either, so a query could carry a little text from something the assistant has read; every query is shown in the chat, and it can only go to arXiv.
+- **Repositories are untrusted too.** A linked repository is only fetched when you click, only from `https://github.com/<owner>/<repo>` with both parts strictly checked, and never with a shell. Clones are bare, with no working tree, so its symlinks and hooks can't do anything, and files are read out of git's object store. The agent has no shell or real tools: it can only ask the server to list, read or search that one repository at that one commit, and it can't choose another repository or a URL. Results reach it marked as data, but a README addressed to an AI can still sway its answer, so treat answers with the same care as the repository itself. What it reads goes to your agent service, so don't link anything you wouldn't send there. Your git settings still apply, so a private repository your git can reach can be linked.
 - **Output is sanitized.** Agent output passes through DOMPurify before rendering, and only the app's own images load, which stops content from leaking through remote image URLs.
 - **Imports are restricted.** arXiv import only downloads from `arxiv.org`, and never fetches arbitrary URLs.
 
@@ -237,6 +249,11 @@ If you find a security issue, please contact the maintainers privately instead o
   - Extraction relies on the optional `@napi-rs/canvas` package. Where it isn't supported, blog posts have no figures, and a paper's cover is the whole page holding its first figure rather than a crop.
 - **Collections:** agent scripts only, with no chat.
 - **Notifications:** they come from the open page, so the tab has to stay open: a closed tab gets none, and neither does a tab the browser has unloaded to save memory. Tasks keep running either way, and the result is there when you come back. They also need a secure address such as `127.0.0.1`, and Android browsers don't show them.
+- **Reading code:**
+  - Reader chat only, GitHub only, and only the default branch's latest commit, so the code may be newer than the paper. Tags, other branches, submodules and Git LFS files aren't available.
+  - The agent only reads the code. It runs nothing, so it can't confirm that the code behaves as written or reproduces the paper's results.
+  - Detection can miss a repository, for example when a line break in the PDF loses a hyphen in its name, and can rank a dependency first. Repositories over 500 MB aren't fetched.
+  - Each question gets up to 8 steps, and each step starts the CLI again, so these answers are slower and use more of your agent quota. Citations can't link to a path containing `[` or `]`.
 - **Assistant:** finds and adds papers on arXiv only, can't add local PDFs itself, and has no notion of citations between papers, so "related" comes from keyword search. Each step starts its CLI again, so long conversations are slow and use more of your agent quota.
 
 AI-generated content can be wrong, so check it against the source before publishing. Before reusing a paper's text or figures, also confirm what its license allows.

@@ -1,3 +1,5 @@
+import type { PaperRepo, RepoRef } from './repo.js';
+
 export type AgentBackend = 'pi' | 'claude' | 'codex' | 'dsh';
 export const AGENT_BACKENDS: AgentBackend[] = ['claude', 'codex', 'pi', 'dsh'];
 
@@ -197,6 +199,28 @@ export interface PaperMeta {
   addedAt: string;
   textChars: number;
   tags: string[];
+  /** The repository the reader chat can read. Only ever set by linking, and checked whenever it's read. */
+  repo?: PaperRepo;
+}
+
+/** Why a repository was ranked where it was. Only for explaining it: none of these is proof. */
+export type RepoHint = 'name' | 'context' | 'early' | 'dependency' | 'references';
+
+/** A repository the paper mentions. Nothing has been fetched from it. */
+export interface RepoCandidate {
+  owner: string;
+  name: string;
+  url: string;
+  /** The first page it appears on. */
+  page: number;
+  /** Worth checking first. It may still be a dependency rather than the paper's own code. */
+  likely: boolean;
+  hints: RepoHint[];
+}
+
+export interface RepoState {
+  link?: PaperRepo;
+  candidates: RepoCandidate[];
 }
 
 export const MAX_TAG_CHARS = 40;
@@ -366,6 +390,12 @@ export interface ChatMessage {
   error?: boolean;
   /** What the user might send next, from this reply. Never part of `content`. */
   suggestions?: string[];
+  /** The repository and commit this reply read, which its code citations point at. */
+  repo?: RepoRef;
+  /** Files read for this reply, for showing where the answer came from. */
+  filesRead?: string[];
+  /** Something the reader should know about how this reply was made. */
+  notice?: string;
   at: string;
 }
 
@@ -456,7 +486,7 @@ export interface ChatSession extends ChatSessionMeta {
   messages: ChatMessage[];
 }
 
-export type JobKind = 'blog' | 'script' | 'synth' | 'chat' | 'assistant' | 'tags';
+export type JobKind = 'blog' | 'script' | 'synth' | 'chat' | 'assistant' | 'tags' | 'repo';
 export type JobStatus = 'running' | 'done' | 'failed' | 'canceled';
 
 export interface Job {
@@ -467,6 +497,8 @@ export interface Job {
   targetId?: string;
   label: string;
   status: JobStatus;
+  /** A reader chat that can read a repository, so its stream may hold tool blocks to hide. */
+  tools?: boolean;
   /** Streamed agent output so far. */
   text: string;
   progress?: { done: number; total?: number; note?: string };

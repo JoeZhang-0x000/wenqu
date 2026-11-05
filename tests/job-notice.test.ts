@@ -29,9 +29,14 @@ describe('which changes are announced', () => {
     expect(finish(kind, 'failed')?.via).toBe('system');
   });
 
-  it.each(['chat', 'tags'] as const)('never announces %s', (kind) => {
+  it.each(['chat', 'tags', 'repo'] as const)('never announces %s', (kind) => {
     expect(finish(kind, 'done')).toBeNull();
     expect(finish(kind, 'failed')).toBeNull();
+  });
+
+  it('never announces a chat that reads a repository', () => {
+    expect(finish('chat', 'done', away, { tools: true })).toBeNull();
+    expect(finish('chat', 'failed', here, { tools: true })).toBeNull();
   });
 
   it('never announces a canceled job', () => {
@@ -176,7 +181,7 @@ describe('offering notifications', () => {
     expect(offer({}, kind)).toBe(true);
   });
 
-  it.each(['chat', 'tags'] as const)('does not offer for %s', (kind) => {
+  it.each(['chat', 'tags', 'repo'] as const)('does not offer for %s', (kind) => {
     expect(offer({}, kind)).toBe(false);
   });
 
