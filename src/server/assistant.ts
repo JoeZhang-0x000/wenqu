@@ -364,6 +364,8 @@ export class Assistant {
       async (ctx) => {
         await this.runActions(id, approved, ctx);
         if (thenAskAgent) await this.converse(id, ctx);
+        // Checked here rather than where converse returns, because cards stay open across turns.
+        if (pendingActions(this.vault.getAssistantSession(id)).length) ctx.awaitApproval();
       },
       (error, canceled) => {
         this.mutate(id, (session) => {

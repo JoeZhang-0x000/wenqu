@@ -113,6 +113,35 @@ describe('assistant routes', () => {
     expect((await call(`/papers/${paperId}`)).data.year).toBe(1999);
   });
 
+  it('says on the job whether a turn ended waiting for approval', async () => {
+    const lastJob = async (sessionId: string) => (await call('/jobs')).data.filter((j: any) => j.targetId === sessionId).at(-1);
+    const ask = `<${TOOL_TAG}>[{"tool":"update_paper","args":{"paper":"${paperId}","year":2001}}]</${TOOL_TAG}>`;
+
+    agent.replies = ['Nothing to do.'];
+    const { data: plain } = await call('/assistant/sessions', { message: 'hello', harness: 'claude' });
+    await settled(plain.sessionId);
+    expect(await lastJob(plain.sessionId)).toMatchObject({ status: 'done' });
+    expect((await lastJob(plain.sessionId)).awaitingApproval).toBeUndefined();
+
+    agent.replies = [ask];
+    const { data: waiting } = await call('/assistant/sessions', { message: 'fix the year', harness: 'claude' });
+    await settled(waiting.sessionId);
+    expect(await lastJob(waiting.sessionId)).toMatchObject({ status: 'done', awaitingApproval: true });
+
+    // The card stays open across a reply that doesn't touch it.
+    agent.replies = ['Which year did you mean?'];
+    await call(`/assistant/sessions/${waiting.sessionId}/messages`, { message: 'why?' });
+    await settled(waiting.sessionId);
+    expect(await lastJob(waiting.sessionId)).toMatchObject({ status: 'done', awaitingApproval: true });
+
+    const { data: session } = await call(`/assistant/sessions/${waiting.sessionId}`);
+    const action = session.messages.flatMap((m: any) => m.actions ?? []).find((a: any) => a.status === 'pending');
+    agent.replies = ['Done.'];
+    await call(`/assistant/sessions/${waiting.sessionId}/decide`, { approve: [action.id] });
+    await settled(waiting.sessionId);
+    expect((await lastJob(waiting.sessionId)).awaitingApproval).toBeUndefined();
+  });
+
   it('changes a card and retries over the API, within what is offered', async () => {
     agent.replies = [`<${TOOL_TAG}>[{"tool":"generate_blog","args":{"paper":"${paperId}"}}]</${TOOL_TAG}>`];
     const { data: created } = await call('/assistant/sessions', { message: 'write', harness: 'claude' });

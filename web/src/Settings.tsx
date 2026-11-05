@@ -15,6 +15,7 @@ import {
   type UiLanguage,
 } from '../../src/shared/types';
 import { agentsStore, api, applySettings, bumpLibrary, fail, loadAgents, settingsStore, toast, useStore } from './lib';
+import { notificationsStore, setNotificationsOn } from './notifications';
 import { Field, Select, Switch } from './ui';
 
 type Section = 'general' | 'agent' | 'assistant' | 'podcast' | 'blog' | 'api' | 'vault';
@@ -123,7 +124,24 @@ function GeneralSection({ settings }: { settings: PublicSettings }) {
         label={t('添加论文时用 Agent 生成标签')}
       />
       <p className="field-hint">{t('论文的标题、摘要和开头部分会发送给你选择的 Agent 服务。')}</p>
+      <NotificationSetting />
     </section>
+  );
+}
+
+function NotificationSetting() {
+  const { support, permission, on } = useStore(notificationsStore);
+  if (support === 'unsupported') return <p className="field-hint">{t('这个浏览器不支持网页通知')}</p>;
+  if (support === 'insecure') return <p className="field-hint">{t('浏览器只允许安全地址发送通知，当前地址不是。请通过启动时显示的 127.0.0.1 地址打开问渠。')}</p>;
+  return (
+    <>
+      <Switch checked={on} disabled={permission === 'denied'} onChange={(next) => void setNotificationsOn(next)} label={t('任务完成时发送浏览器通知')} />
+      <p className="field-hint">
+        {permission === 'denied'
+          ? t('浏览器已拒绝这个页面发送通知。要重新开启，请点地址栏里的站点图标，在网站设置中允许通知，然后回到这里。')
+          : t('任务完成、失败或助手等待批准时提醒你。标签页必须保持打开，关闭后就收不到了。')}
+      </p>
+    </>
   );
 }
 

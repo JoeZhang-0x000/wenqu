@@ -10,6 +10,8 @@ export interface JobContext {
   /** Clears the streamed text, once it has been saved somewhere else. */
   reset(): void;
   progress(progress: NonNullable<Job['progress']>): void;
+  /** Goes out with the job's final state, so the page can tell "needs you" from "finished". */
+  awaitApproval(): void;
 }
 
 /** In-memory background tasks. They outlive the browser tab and report over one shared event stream. */
@@ -59,6 +61,9 @@ export class Jobs extends EventEmitter {
       progress: (progress) => {
         job.progress = progress;
         this.send({ type: 'job', job: { ...job } });
+      },
+      awaitApproval: () => {
+        job.awaitingApproval = true;
       },
     };
 

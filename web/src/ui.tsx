@@ -50,10 +50,10 @@ export function Select({
   );
 }
 
-export function Switch({ checked, onChange, label }: { checked: boolean; onChange(v: boolean): void; label: string }) {
+export function Switch({ checked, onChange, label, disabled }: { checked: boolean; onChange(v: boolean): void; label: string; disabled?: boolean }) {
   return (
-    <label className="switch">
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+    <label className={`switch ${disabled ? 'disabled' : ''}`}>
+      <input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
       <span className="switch-track" />
       <span>{label}</span>
     </label>
