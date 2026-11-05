@@ -46,6 +46,8 @@ npm run build
 npm start
 ```
 
+When `origin/main` has new commits, a bar at the top of the page offers **Update and restart**: it pulls, reinstalls, rebuilds and reloads the page. It explains itself instead if you have local changes, are on another branch, or are running `npm run dev`.
+
 Your browser opens automatically. Then:
 
 1. Open **Settings → Agent backend**, choose a backend, and click **Test** to confirm it works.

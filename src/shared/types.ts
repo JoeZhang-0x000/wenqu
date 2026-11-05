@@ -1,6 +1,13 @@
 export type AgentBackend = 'pi' | 'claude' | 'codex' | 'dsh';
 export const AGENT_BACKENDS: AgentBackend[] = ['claude', 'codex', 'pi', 'dsh'];
 
+export interface UpdateStatus {
+  /** Commits on origin/main that this checkout doesn't have. */
+  behind: number;
+  /** Why updating from the page isn't possible right now. */
+  blocked?: string;
+}
+
 export type PodcastEngine = 'agent' | 'doubao';
 export type PodcastLength = 'short' | 'medium' | 'long';
 
