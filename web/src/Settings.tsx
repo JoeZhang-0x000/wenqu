@@ -104,6 +104,12 @@ function GeneralSection({ settings }: { settings: PublicSettings }) {
           onChange={(uiLanguage) => save({ uiLanguage: uiLanguage as UiLanguage })}
         />
       </Field>
+      <Switch
+        checked={settings.library.autoTag}
+        onChange={(autoTag) => save({ library: { autoTag } })}
+        label={t('添加论文时用 Agent 生成标签')}
+      />
+      <p className="field-hint">{t('论文的标题、摘要和开头部分会发送给你选择的 Agent 服务。')}</p>
     </section>
   );
 }

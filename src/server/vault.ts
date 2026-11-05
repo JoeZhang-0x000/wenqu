@@ -14,7 +14,10 @@ import { t } from '../shared/i18n.js';
 import {
   AGENT_BACKENDS,
   COLLECTION_ID_PREFIX,
+  MAX_PAPER_TAGS,
+  countTags,
   isCollectionId,
+  normalizeTags,
   type AgentBackend,
   type AssistantSession,
   type Blog,
@@ -29,6 +32,7 @@ import {
   type PaperMeta,
   type PaperSummary,
   type Podcast,
+  type TagCount,
 } from '../shared/types.js';
 import { extractPdf } from './pdf.js';
 
@@ -154,6 +158,7 @@ export class Vault {
       sourceName: basename(sourceName),
       addedAt: new Date().toISOString(),
       textChars: extract.pages.reduce((n, p) => n + p.length, 0),
+      tags: [],
     };
     writeJson(join(dir, 'meta.json'), meta);
     return { meta, duplicate: false };
@@ -182,16 +187,42 @@ export class Vault {
     return {
       ...meta,
       id,
+      // Papers from before tags existed have none, and this file can be edited by hand.
+      tags: normalizeTags(meta.tags),
       blogCount: count('blogs'),
       podcastCount: count('podcasts'),
       hasThumb: existsSync(join(dir, 'thumb.jpg')),
     };
   }
 
-  updatePaper(id: string, patch: Partial<Pick<PaperMeta, 'title' | 'authors' | 'year' | 'abstract'>>): PaperSummary {
+  updatePaper(id: string, patch: Partial<Pick<PaperMeta, 'title' | 'authors' | 'year' | 'abstract' | 'tags'>>): PaperSummary {
     const { blogCount: _b, podcastCount: _p, hasThumb: _t, ...meta } = this.getPaper(id);
-    writeJson(join(this.paperDir(id), 'meta.json'), { ...meta, ...patch, id });
+    const next = { ...meta, ...patch, id };
+    if (patch.tags) {
+      next.tags = this.spellTags(normalizeTags(patch.tags), id);
+      if (next.tags.length > MAX_PAPER_TAGS) throw new BadRequest(t('一篇论文最多 {count} 个标签', { count: MAX_PAPER_TAGS }));
+    }
+    writeJson(join(this.paperDir(id), 'meta.json'), next);
     return this.getPaper(id);
+  }
+
+  listTags(): TagCount[] {
+    return countTags(this.listPapers());
+  }
+
+  /** Uses the library's spelling of a tag, so that "llm" and "LLM" don't become two filters. */
+  spellTags(tags: string[], exceptPaper?: string): string[] {
+    const known = new Map<string, string>();
+    for (const paper of this.listPapers()) {
+      if (paper.id === exceptPaper) continue;
+      for (const tag of paper.tags) if (!known.has(tag.toLowerCase())) known.set(tag.toLowerCase(), tag);
+    }
+    return tags.map((tag) => known.get(tag.toLowerCase()) ?? tag);
+  }
+
+  /** Keeps what the paper has, and adds what still fits. */
+  addTags(id: string, tags: string[]): PaperSummary {
+    return this.updatePaper(id, { tags: normalizeTags([...this.getPaper(id).tags, ...tags]).slice(0, MAX_PAPER_TAGS) });
   }
 
   /** Finds an imported arXiv paper. Without a version in `arxivId`, any version matches. */

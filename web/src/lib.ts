@@ -79,7 +79,11 @@ export function connectEvents() {
   source.onmessage = (e) => {
     const event = JSON.parse(e.data) as ServerEvent;
     if (event.type === 'library') bumpLibrary();
-    else if (event.type === 'job') jobsStore.set({ ...jobsStore.get(), [event.job.id]: event.job });
+    else if (event.type === 'job') {
+      jobsStore.set({ ...jobsStore.get(), [event.job.id]: event.job });
+      // Tagging has no panel of its own that could show this.
+      if (event.job.kind === 'tags' && event.job.status === 'failed') toast(`${event.job.label}：${event.job.error}`, 'error');
+    }
     else if (event.type === 'delta') {
       const job = jobsStore.get()[event.jobId];
       if (job) jobsStore.set({ ...jobsStore.get(), [job.id]: { ...job, text: job.text + event.text } });

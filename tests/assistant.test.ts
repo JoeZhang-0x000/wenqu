@@ -6,7 +6,7 @@ import { TOOL_TAG, parseReply, visibleReply } from '../src/shared/assistant';
 import { Assistant, type AssistantDeps } from '../src/server/assistant';
 import { defaultSettings } from '../src/server/config';
 import { Jobs } from '../src/server/jobs';
-import { assistantTranscript } from '../src/server/prompts';
+import { assistantTranscript, parseTagReply } from '../src/server/prompts';
 import { Vault } from '../src/server/vault';
 import type { AgentRequest } from '../src/server/agents';
 import type { AssistantAction, AssistantMessage, Job, Settings } from '../src/shared/types';
@@ -56,6 +56,19 @@ describe('reading replies', () => {
     expect(visibleReply('Sure.\n<wenq')).toBe('Sure.');
     expect(visibleReply(`Sure.\n<${TOOL_TAG}>[{"tool"`)).toBe('Sure.');
     expect(visibleReply('1 < 2 is true')).toBe('1 < 2 is true');
+  });
+});
+
+describe('reading tags from an agent', () => {
+  it.each([
+    ['["a", "b"]', ['a', 'b']],
+    ['Sure, see [p.3]:\n```json\n["a", "#b", "A"]\n```\nDone.', ['a', 'b']],
+  ])('finds them in %s', (raw, tags) => {
+    expect(parseTagReply(raw)).toEqual(tags);
+  });
+
+  it.each(['No tags here.', '[p.3]', '[]', '[1, 2]'])('reports nothing usable in %s', (raw) => {
+    expect(() => parseTagReply(raw)).toThrow();
   });
 });
 
@@ -193,6 +206,7 @@ describe('Assistant', () => {
     it.each([
       ['add_arxiv', { input: '2401.00001' }],
       ['update_paper', { paper: 'PAPER', title: 'New' }],
+      ['tag_paper', { paper: 'PAPER', add: ['pruning'] }],
       ['delete_paper', { paper: 'PAPER' }],
       ['generate_podcast', { paper: 'PAPER' }],
       ['generate_blog', { paper: 'PAPER' }],
@@ -537,6 +551,98 @@ describe('Assistant', () => {
       const id = await start();
       expect(actionsOf(id)).toHaveLength(31);
       expect(deps.searchArxiv).toHaveBeenCalledTimes(30);
+    });
+  });
+
+  describe('tags', () => {
+    it('shows the tags in the library without asking', async () => {
+      vault.updatePaper(paperId, { tags: ['pruning'] });
+      say(block({ tool: 'list_tags' }), 'Done.');
+      const id = await start();
+      expect(actionsOf(id)[0].status).toBe('done');
+      expect(actionsOf(id)[0].result).toBe('[{"tag":"pruning","count":1}]');
+    });
+
+    it('lists papers by tag, and those without any', async () => {
+      const other = (await vault.importPdf(zh, 'x.pdf')).meta.id;
+      vault.updatePaper(paperId, { tags: ['Pruning'] });
+      const listed = async (args: Record<string, unknown>) => {
+        say(block({ tool: 'list_papers', args }), 'Done.');
+        const action = actionsOf(await start()).at(-1)!;
+        return JSON.parse(action.result!).papers.map((p: { id: string }) => p.id);
+      };
+      expect(await listed({ tag: 'pruning' })).toEqual([paperId]);
+      expect(await listed({ query: 'pruning' })).toEqual([paperId]);
+      expect(await listed({ untagged: true })).toEqual([other]);
+    });
+
+    it('changes nothing until approved, then only what was named', async () => {
+      vault.updatePaper(paperId, { tags: ['keep', 'old'] });
+      say(block({ tool: 'tag_paper', args: { paper: paperId, add: ['new'], remove: ['OLD'] } }), 'Done.');
+      const id = await start();
+      const [action] = actionsOf(id);
+      expect(action).toMatchObject({ status: 'pending', details: [{ before: 'keep, old', value: 'keep, new' }] });
+      expect(vault.getPaper(paperId).tags).toEqual(['keep', 'old']);
+      // What the user added in the meantime survives, because the action only says what changes.
+      vault.updatePaper(paperId, { tags: ['keep', 'old', 'mine'] });
+      await approveAll(id);
+      expect(vault.getPaper(paperId).tags).toEqual(['keep', 'mine', 'new']);
+    });
+
+    it('shows the library\'s spelling on the card', async () => {
+      vault.updatePaper(paperId, { tags: ['LLM'] });
+      const other = (await vault.importPdf(zh, 'x.pdf')).meta.id;
+      say(block({ tool: 'tag_paper', args: { paper: other, add: ['llm'] } }));
+      const [action] = actionsOf(await start());
+      expect(action.args.add).toEqual(['LLM']);
+      expect(action.details?.[0].value).toBe('LLM');
+    });
+
+    it.each([
+      [{ add: [] }, 'Nothing would change'],
+      [{ add: 'pruning' }, 'array'],
+      [{ add: ['x'.repeat(41)] }, 'at most'],
+      [{ add: Array.from({ length: 13 }, (_, i) => `t${i}`) }, 'at most'],
+    ])('sends a bad request back to the agent: %j', async (args, message) => {
+      say(block({ tool: 'tag_paper', args: { paper: paperId, ...args } }), 'Sorry.');
+      const [action] = actionsOf(await start());
+      expect(action.status).toBe('failed');
+      expect(action.result).toContain(message);
+    });
+
+    it('refuses a collection', async () => {
+      const other = (await vault.importPdf(zh, 'x.pdf')).meta.id;
+      const collection = vault.createCollection('Both', [paperId, other]);
+      say(block({ tool: 'tag_paper', args: { paper: collection.id, add: ['x'] } }), 'Sorry.');
+      expect(actionsOf(await start())[0].result).toContain('collection');
+    });
+
+    it('adds a paper with its tags on one approval', async () => {
+      vault.updatePaper(paperId, { tags: ['LLM'] });
+      say(block({ tool: 'add_arxiv', args: { input: '2401.00001', tags: ['llm', 'pruning'] } }), 'Done.');
+      const id = await start();
+      const [action] = actionsOf(id);
+      expect(action.status).toBe('pending');
+      expect(action.details).toContainEqual({ label: expect.any(String), value: 'LLM, pruning' });
+      await approveAll(id);
+      expect(vault.findArxiv('2401.00001')?.tags).toEqual(['LLM', 'pruning']);
+      expect(requests[1].prompt).toContain('pruning');
+    });
+
+    it('adds a paper without tags when none are given', async () => {
+      say(block({ tool: 'add_arxiv', args: { input: '2401.00001' } }), 'Done.');
+      const id = await start();
+      expect(actionsOf(id)[0].args).toEqual({ input: '2401.00001' });
+      await approveAll(id);
+      expect(vault.findArxiv('2401.00001')?.tags).toEqual([]);
+    });
+
+    it('tags a paper that an earlier action in the block adds', async () => {
+      say(block({ tool: 'add_arxiv', args: { input: '2401.00001' } }, { tool: 'tag_paper', args: { paper: '2401.00001', add: ['pruning'] } }), 'Done.');
+      const id = await start();
+      expect(actionsOf(id).map((a) => a.status)).toEqual(['pending', 'pending']);
+      await approveAll(id);
+      expect(vault.findArxiv('2401.00001')?.tags).toEqual(['pruning']);
     });
   });
 

@@ -104,6 +104,17 @@ In the library, click **Make collection**, select 2 to 12 papers, then choose a 
 - **Weekly digest:** covers the papers one at a time, as a single episode or post.
 - **Mini review:** organizes by theme and compares methods and evidence across papers.
 
+### Tags
+
+Tags group papers by whatever you care about, and the row above the shelf filters by them. Choosing several narrows the list to papers that have them all, **No tags** shows what you haven't got to, and clicking a tag on a card works too.
+
+- **By hand:** open a paper and click the tag icon in the top bar.
+- **With an agent:** the same panel has **Generate with agent**, which adds a few tags from the paper's title, abstract and opening pages. It reuses tags you already have where they fit.
+- **When adding a paper:** turn on **Generate tags with the agent when adding papers** in the add-paper dialog or under **Settings → General**. It's off by default, and it covers dropped files too.
+- **Through the assistant:** ask it to tag your untagged papers, or to clean up the tags on a topic. Tags it wants to give a paper it adds from arXiv appear on the same card you approve.
+
+Tags that differ only in case count as one, so `llm` takes the spelling already in your library.
+
 ### Assistant
 
 Open **Assistant** in the top bar. Unlike chat, which stays with one paper, the assistant can see your entire library. Try:
@@ -116,10 +127,10 @@ Nothing happens to your library without you. Each request shows up as a card wri
 
 | Action | Approval |
 |---|---|
-| Add, edit or delete a paper; create a collection | Always |
+| Add, edit, tag or delete a paper; create a collection | Always |
 | Generate a podcast or blog post; synthesize audio | Always |
 | Read or search a paper's full text | By default. You can allow it for one chat or always, and change that under **Settings → Assistant** |
-| See titles, authors, abstracts, collections and what's been generated | Not needed |
+| See titles, authors, abstracts, tags, collections and what's been generated | Not needed |
 | Search arXiv | Not needed, because it changes nothing |
 
 Results from an arXiv search can also be added with their own **Add** button. The assistant can add papers from arXiv only, so use **Add paper** for local PDFs. To stop a batch, press stop in the chat, which also stops any generation it started.
@@ -153,7 +164,7 @@ The vault lives in `~/Wenqu` by default. Its contents remain usable without this
 <vault>/
   papers/<paper-id>/
     paper.pdf
-    meta.json         Title, authors and so on; safe to edit by hand
+    meta.json         Title, authors, tags and so on; safe to edit by hand
     text.json         Extracted text, page by page
     chats/<id>.json   One file per conversation
     figures/          Extracted figures

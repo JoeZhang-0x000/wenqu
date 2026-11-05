@@ -44,6 +44,7 @@ export function defaultSettings(): Settings {
     },
     blog: { language: getLocale(), style: 'explainer', customStyle: '' },
     assistant: { autoApproveReads: false },
+    library: { autoTag: false },
     doubao: { apiKey: '', resourceId: DOUBAO_RESOURCE_ID },
   };
 }
@@ -61,6 +62,7 @@ function merge(base: Settings, patch: SettingsPatch): Settings {
     podcast: { ...base.podcast, ...patch.podcast },
     blog: { ...base.blog, ...patch.blog },
     assistant: { ...base.assistant, ...patch.assistant },
+    library: { ...base.library, ...patch.library },
     doubao: { ...base.doubao, ...patch.doubao },
   };
 }

@@ -86,6 +86,84 @@ describe('assistant routes', () => {
     expect((await call(`${path}/retry`, { actions: [action.id] }, { Origin: 'https://evil.example' })).status).toBe(403);
   });
 
+  describe('tags', () => {
+    const patch = async (body: unknown) => {
+      const res = await fetch(`${base}/api/papers/${paperId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      return { status: res.status, data: (await res.json()) as any };
+    };
+    const fixture = (name: string) => readFileSync(join(__dirname, 'fixtures', name));
+
+    beforeEach(() => patch({ tags: [] }));
+
+    it('saves, tidies and counts them', async () => {
+      const { data } = await patch({ tags: [' #LLM ', 'llm', 'information   retrieval'] });
+      expect(data.tags).toEqual(['LLM', 'information retrieval']);
+      expect((await call('/tags')).data).toEqual([
+        { tag: 'information retrieval', count: 1 },
+        { tag: 'LLM', count: 1 },
+      ]);
+    });
+
+    it('leaves them alone when given something that is not a list', async () => {
+      await patch({ tags: ['kept'] });
+      expect((await patch({ tags: 'oops' })).status).toBe(400);
+      expect((await call(`/papers/${paperId}`)).data.tags).toEqual(['kept']);
+    });
+
+    it('refuses more than a paper can have', async () => {
+      const { status } = await patch({ tags: Array.from({ length: 13 }, (_, i) => `tag ${i}`) });
+      expect(status).toBe(400);
+      expect((await call(`/papers/${paperId}`)).data.tags).toEqual([]);
+    });
+
+    it('generates them on request, on top of what is there', async () => {
+      await patch({ tags: ['kept'] });
+      agent.replies = ['Here you go:\n```json\n["kept", "re-ranking", "pruning"]\n```'];
+      const { data: job } = await call(`/papers/${paperId}/tags/generate`, {});
+      expect(job).toMatchObject({ kind: 'tags', status: 'running', paperId });
+      await settled(`tags-${paperId}`);
+      expect((await call(`/papers/${paperId}`)).data.tags).toEqual(['kept', 're-ranking', 'pruning']);
+    });
+
+    it('keeps the tags as they are when the agent says nothing useful', async () => {
+      await patch({ tags: ['kept'] });
+      agent.replies = ['Sorry, see [p.3].'];
+      await call(`/papers/${paperId}/tags/generate`, {});
+      const job = (await settled(`tags-${paperId}`)) as { status: string; error: string };
+      expect(job.status).toBe('failed');
+      expect((await call(`/papers/${paperId}`)).data.tags).toEqual(['kept']);
+    });
+
+    it('generates them for a new paper only when asked', async () => {
+      const upload = async (name: string, query = '') => {
+        const res = await fetch(`${base}/api/papers?filename=${name}.pdf${query}`, { method: 'POST', body: fixture('cpn-zh.pdf') });
+        return (await res.json()) as any;
+      };
+      const plain = await upload('plain');
+      expect(plain.paper.tags).toEqual([]);
+      expect((await call('/jobs')).data.some((j: any) => j.targetId === `tags-${plain.paper.id}`)).toBe(false);
+
+      await fetch(`${base}/api/papers/${plain.paper.id}`, { method: 'DELETE' });
+      agent.replies = ['["pruning"]'];
+      const asked = await upload('asked', '&autoTag=1');
+      expect(asked.duplicate).toBe(false);
+      await settled(`tags-${asked.paper.id}`);
+      expect((await call(`/papers/${asked.paper.id}`)).data.tags).toEqual(['pruning']);
+
+      // Nothing new was added, so a tagged paper isn't tagged again.
+      agent.replies = ['["unwanted"]'];
+      expect((await upload('again', '&autoTag=1')).duplicate).toBe(true);
+      await settled(`tags-${asked.paper.id}`);
+      expect((await call(`/papers/${asked.paper.id}`)).data.tags).toEqual(['pruning']);
+    });
+
+    it('remembers the choice to tag new papers', async () => {
+      const put = await fetch(`${base}/api/settings`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ library: { autoTag: true } }) });
+      expect(((await put.json()) as any).library.autoTag).toBe(true);
+      expect((await call('/settings')).data.library.autoTag).toBe(true);
+    });
+  });
+
   it('rejects a decision from another website', async () => {
     const { data: created } = await call('/assistant/sessions', { message: 'hello', harness: 'claude' });
     await settled(created.sessionId);

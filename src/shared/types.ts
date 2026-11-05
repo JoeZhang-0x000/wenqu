@@ -36,6 +36,10 @@ export interface Settings {
     /** Lets the assistant read inside papers without asking. Changes always need approval. */
     autoApproveReads: boolean;
   };
+  library: {
+    /** Runs an agent to tag each paper the user adds. The assistant chooses its own tags. */
+    autoTag: boolean;
+  };
   doubao: {
     apiKey: string;
     resourceId: string;
@@ -59,6 +63,7 @@ export interface SettingsPatch {
   podcast?: Partial<Settings['podcast']>;
   blog?: Partial<Settings['blog']>;
   assistant?: Partial<Settings['assistant']>;
+  library?: Partial<Settings['library']>;
   doubao?: Partial<Settings['doubao']>;
 }
 
@@ -179,6 +184,39 @@ export interface PaperMeta {
   sourceName: string;
   addedAt: string;
   textChars: number;
+  tags: string[];
+}
+
+export const MAX_TAG_CHARS = 40;
+export const MAX_PAPER_TAGS = 12;
+
+export interface TagCount {
+  tag: string;
+  count: number;
+}
+
+/** Tidies tags from any source. Tags differing only in case count as one, and the first spelling stays. */
+export function normalizeTags(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const tags = new Map<string, string>();
+  for (const item of value) {
+    if (typeof item !== 'string') continue;
+    const tag = item.replace(/^[\s#＃]+/, '').trim().replace(/\s+/g, ' ');
+    if (tag && tag.length <= MAX_TAG_CHARS && !tags.has(tag.toLowerCase())) tags.set(tag.toLowerCase(), tag);
+  }
+  return [...tags.values()];
+}
+
+export function changeTags(current: string[], add: string[], remove: string[] = []): string[] {
+  const removed = new Set(remove.map((tag) => tag.toLowerCase()));
+  return normalizeTags([...current.filter((tag) => !removed.has(tag.toLowerCase())), ...add]);
+}
+
+/** Most used first. */
+export function countTags(papers: { tags: string[] }[]): TagCount[] {
+  const counts = new Map<string, number>();
+  for (const paper of papers) for (const tag of paper.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+  return [...counts].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
 }
 
 export type ArxivMeta = Required<Pick<PaperMeta, 'title' | 'authors' | 'arxivId'>> & Pick<PaperMeta, 'year' | 'abstract'>;
@@ -387,7 +425,7 @@ export interface ChatSession extends ChatSessionMeta {
   messages: ChatMessage[];
 }
 
-export type JobKind = 'blog' | 'script' | 'synth' | 'chat' | 'assistant';
+export type JobKind = 'blog' | 'script' | 'synth' | 'chat' | 'assistant' | 'tags';
 export type JobStatus = 'running' | 'done' | 'failed' | 'canceled';
 
 export interface Job {

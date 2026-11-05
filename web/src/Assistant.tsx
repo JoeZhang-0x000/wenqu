@@ -15,6 +15,7 @@ const starters = () => [
   t('书架里哪些论文还没有播客？'),
   t('帮我找几篇和最新添加的论文相近的工作'),
   t('给最近添加的 3 篇论文各生成一期播客脚本'),
+  t('给还没有标签的论文生成标签'),
 ];
 
 export function Assistant({ sessionId }: { sessionId?: string }) {
@@ -406,7 +407,7 @@ function Hit({ hit }: { hit: ArxivHit }) {
   const add = async () => {
     setBusy(true);
     try {
-      const { paper, duplicate } = await api<{ paper: PaperSummary; duplicate: boolean }>('/papers/arxiv', { body: { input: hit.arxivId } });
+      const { paper, duplicate } = await api<{ paper: PaperSummary; duplicate: boolean }>('/papers/arxiv', { body: { input: hit.arxivId, autoTag: settingsStore.get()?.library.autoTag } });
       setAdded(paper.id);
       toast(duplicate ? t('已经在库里：{title}', { title: paper.title }) : t('已导入：{title}', { title: paper.title }));
       bumpLibrary();
