@@ -1,6 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { getLocale, setLocale, t, type Locale } from '../../src/shared/i18n';
-import { isCollectionId, type AgentStatus, type Job, type Podcast, type PublicSettings, type ServerEvent } from '../../src/shared/types';
+import type { AgentStatus, Job, Podcast, PublicSettings, ServerEvent } from '../../src/shared/types';
+import { parseRoute, type Route } from './routes';
 
 export async function api<T = any>(path: string, init?: { method?: string; body?: unknown; raw?: BodyInit }): Promise<T> {
   const res = await fetch(`/api${path}`, {
@@ -68,10 +69,13 @@ export async function refreshSettings() {
   applySettings(await api<PublicSettings>('/settings'));
 }
 
-export function connectEvents() {
+/** `onJob` sees every change with the state before it. `live` is false when it comes from catching up after a connect. */
+export function connectEvents(onJob: (previous: Job | undefined, job: Job, live: boolean) => void) {
   const sync = () =>
     api<Job[]>('/jobs').then((jobs) => {
+      const previous = jobsStore.get();
       jobsStore.set(Object.fromEntries(jobs.map((j) => [j.id, j])));
+      for (const job of jobs) onJob(previous[job.id], job, false);
       bumpLibrary();
     });
   const source = new EventSource('/api/events');
@@ -80,7 +84,9 @@ export function connectEvents() {
     const event = JSON.parse(e.data) as ServerEvent;
     if (event.type === 'library') bumpLibrary();
     else if (event.type === 'job') {
+      const previous = jobsStore.get()[event.job.id];
       jobsStore.set({ ...jobsStore.get(), [event.job.id]: event.job });
+      onJob(previous, event.job, true);
       // Tagging has no panel of its own that could show this.
       if (event.job.kind === 'tags' && event.job.status === 'failed') toast(`${event.job.label}：${event.job.error}`, 'error');
     }
@@ -256,40 +262,16 @@ export function download(filename: string, content: string, type = 'text/markdow
 
 // Routing ---------------------------------------------------------------------
 
-export interface Route {
-  page: 'library' | 'works' | 'paper' | 'collections' | 'collection' | 'assistant';
-  id?: string;
-  tab?: string;
-  item?: string;
-  /** PDF page to open at. */
-  at?: number;
+export { ownerHref, paperHref, type Route } from './routes';
+
+/** Read from the URL, because switching a tab in a panel changes it without a hashchange. */
+export const currentRoute = () => parseRoute(location.hash);
+
+export const routeStore = createStore<Route>(currentRoute());
+window.addEventListener('hashchange', () => routeStore.set(currentRoute()));
+
+/** Goes to a link even if the store still remembers it, which would leave an open panel on another tab. */
+export function goTo(href: string) {
+  routeStore.set(currentRoute());
+  location.hash = href;
 }
-
-function parseHash(): Route {
-  const [path, query] = location.hash.replace(/^#\/?/, '').split('?');
-  const params = new URLSearchParams(query);
-  const [head, id] = path.split('/');
-  const detail = { id, tab: params.get('tab') ?? undefined, item: params.get('item') ?? undefined };
-  if (head === 'paper' && id) return { page: 'paper', ...detail, at: Number(params.get('at')) || undefined };
-  if (head === 'collection' && id) return { page: 'collection', ...detail };
-  if (head === 'collections') return { page: 'collections' };
-  if (head === 'works') return { page: 'works' };
-  if (head === 'assistant') return { page: 'assistant', id };
-  return { page: 'library' };
-}
-
-export const routeStore = createStore<Route>(parseHash());
-window.addEventListener('hashchange', () => routeStore.set(parseHash()));
-
-function detailHref(kind: string, id: string, params: Record<string, string | number | undefined>) {
-  const search = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) if (value !== undefined) search.set(key, String(value));
-  const query = search.toString();
-  return `#/${kind}/${id}${query ? `?${query}` : ''}`;
-}
-
-export const paperHref = (id: string, tab?: string, item?: string, at?: number) => detailHref('paper', id, { tab, item, at });
-
-/** Links to whatever owns a post or an episode: a paper or a collection. */
-export const ownerHref = (id: string, tab?: string, item?: string) =>
-  isCollectionId(id) ? detailHref('collection', id, { tab, item }) : paperHref(id, tab, item);

@@ -141,6 +141,14 @@ Results from an arXiv search can also be added with their own **Add** button. Th
 
 When a turn is finished and nothing is waiting for approval, the assistant can offer a few next steps as buttons under its reply. Clicking one sends it as your next message and nothing more, so any change it leads to still needs your approval.
 
+### Notifications
+
+Blog posts, scripts, audio and the assistant all run in the background. Turn on **Settings → General → Send a browser notification when a task finishes**, or accept the offer shown when your first task starts, and the browser tells you when a task finishes or fails, or when the assistant is waiting for your approval. Clicking the notification opens the result.
+
+If you are looking at the page, you get a short message inside it instead, and no message when a task succeeds on the result's page you're already on. A failed blog post, script or audio run always shows one. A notification shows the task's label, which usually includes the paper's title, so that text is visible on your screen and in your system's notification history.
+
+The permission belongs to the browser and to the exact address, port included. If 4317 is taken and Wenqu moves to another port, or you open `localhost` instead of `127.0.0.1`, you need to allow it again.
+
 ## Command line
 
 ```text
@@ -228,6 +236,7 @@ If you find a security issue, please contact the maintainers privately instead o
   - Agents can't see the images, so they choose and describe figures from their captions alone.
   - Extraction relies on the optional `@napi-rs/canvas` package. Where it isn't supported, blog posts have no figures, and a paper's cover is the whole page holding its first figure rather than a crop.
 - **Collections:** agent scripts only, with no chat.
+- **Notifications:** they come from the open page, so the tab has to stay open: a closed tab gets none, and neither does a tab the browser has unloaded to save memory. Tasks keep running either way, and the result is there when you come back. They also need a secure address such as `127.0.0.1`, and Android browsers don't show them.
 - **Assistant:** finds and adds papers on arXiv only, can't add local PDFs itself, and has no notion of citations between papers, so "related" comes from keyword search. Each step starts its CLI again, so long conversations are slow and use more of your agent quota.
 
 AI-generated content can be wrong, so check it against the source before publishing. Before reusing a paper's text or figures, also confirm what its license allows.

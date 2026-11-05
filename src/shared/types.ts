@@ -471,6 +471,8 @@ export interface Job {
   text: string;
   progress?: { done: number; total?: number; note?: string };
   error?: string;
+  /** Set when an assistant turn ends with actions still waiting for the user. */
+  awaitingApproval?: boolean;
   createdAt: string;
   finishedAt?: string;
 }

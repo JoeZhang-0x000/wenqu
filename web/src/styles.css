@@ -431,6 +431,8 @@ input[type='range'] { width: 100%; accent-color: var(--signal); }
 .switch input:checked + .switch-track { background: var(--signal); }
 .switch input:checked + .switch-track::after { transform: translateX(12px); }
 .switch input:focus-visible + .switch-track { outline: 2px solid var(--signal); outline-offset: 1px; }
+.switch.disabled { cursor: default; color: var(--ink-3); }
+.field-hint + .switch { margin-top: 14px; }
 .segmented { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
 .segmented button { display: flex; flex-direction: column; gap: 2px; padding: 9px 11px; text-align: left; border: 1px solid var(--line); border-radius: 9px; }
 .segmented button span { font-size: 0.75rem; color: var(--ink-2); line-height: 1.35; }

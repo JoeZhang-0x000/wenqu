@@ -7,6 +7,7 @@ import { api, confirmStore, connectEvents, fail, jobsStore, localeStore, refresh
 import { CollectionView, Collections } from './Collections';
 import { AddPaperDialog, importFiles } from './AddPaper';
 import { Library } from './Library';
+import { acceptNotificationOffer, dismissNotificationOffer, notificationOfferStore, notificationsStore, observeJob } from './notifications';
 import { Player } from './Player';
 import { Reader } from './Reader';
 import { SettingsDialog } from './Settings';
@@ -26,7 +27,7 @@ export function App() {
 
   useEffect(() => {
     refreshSettings().catch((err: Error) => setLoadError(err.message));
-    connectEvents();
+    connectEvents(observeJob);
   }, []);
 
   // Dropping a PDF anywhere imports it, and keeps the browser from navigating to the file.
@@ -94,6 +95,7 @@ export function App() {
         </button>
       </header>
       <UpdateBanner />
+      <NotificationOffer />
       <main className="main">
         {route.page === 'library' && <Library />}
         {route.page === 'works' && <Works />}
@@ -234,6 +236,22 @@ function UpdateBanner() {
           <X size={14} />
         </button>
       )}
+    </div>
+  );
+}
+
+/** Asks for the browser's permission only from the click on this button. */
+function NotificationOffer() {
+  const offered = useStore(notificationOfferStore);
+  const { permission, on } = useStore(notificationsStore);
+  if (!offered || permission !== 'default' || on) return null;
+  return (
+    <div className="notice update">
+      <span>{t('这个任务会在后台继续运行')}</span>
+      <button className="btn small" onClick={() => void acceptNotificationOffer()}>{t('完成时通知我')}</button>
+      <button className="icon" title={t('关闭')} onClick={dismissNotificationOffer}>
+        <X size={14} />
+      </button>
     </div>
   );
 }
