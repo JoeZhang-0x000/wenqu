@@ -4,7 +4,7 @@ import type { PaperFigure } from '../shared/types.js';
 import { openPdf } from './pdf.js';
 
 /** Bump when detection changes, so cached results get recomputed. */
-export const FIGURES_VERSION = 1;
+export const FIGURES_VERSION = 2;
 
 const RENDER_SCALE = 2.2;
 const MAX_WIDTH = 1800;
@@ -51,6 +51,56 @@ export function layoutLines(items: any[], pageHeight: number): Box[] {
   return lines;
 }
 
+/** Fewer than this in a column could be a chart's axis. */
+const MIN_MARGIN_NUMBERS = 8;
+
+/** Drops the line numbers in a review copy's margin, which would otherwise count as the edge of the text. */
+export function withoutMarginNumbers(lines: Box[]): Box[] {
+  const columns = new Map<number, Box[]>();
+  for (const line of lines) {
+    if (!/^\d{1,4}$/.test(line.text.trim())) continue;
+    const column = Math.round(line.x1 / 2);
+    columns.set(column, [...(columns.get(column) ?? []), line]);
+  }
+  const dropped = new Set<Box>();
+  for (const column of columns.values()) {
+    const numbers = [...column].sort((a, b) => a.top - b.top).map((l) => Number(l.text));
+    const counting = numbers.filter((n, i) => i > 0 && n === numbers[i - 1] + 1).length;
+    if (column.length >= MIN_MARGIN_NUMBERS && counting >= (column.length - 1) * 0.8) column.forEach((l) => dropped.add(l));
+  }
+  return lines.filter((l) => !dropped.has(l));
+}
+
+/** Shorter than this is more likely a label in a figure at the top of a page than a running head. */
+const MIN_HEAD_LENGTH = 8;
+
+/** The topmost lines of a page, if they sit in the top margin area. */
+function topLines(lines: Box[], height: number): Box[] {
+  const top = Math.min(...lines.map((l) => l.top));
+  return top < height * 0.1 ? lines.filter((l) => l.top < top + 2) : [];
+}
+
+const headKey = (text: string) => text.replace(/\d+/g, '#').replace(/\s+/g, ' ').trim().toLowerCase();
+
+/** Text that heads more than one page, with page numbers ignored. Odd and even pages may each have their own. */
+export function findRunningHeads(pages: { lines: Box[]; height: number }[]): Set<string> {
+  const seen = new Map<string, number>();
+  for (const { lines, height } of pages) {
+    for (const key of new Set(topLines(lines, height).map((l) => headKey(l.text)))) {
+      if (key.length >= MIN_HEAD_LENGTH) seen.set(key, (seen.get(key) ?? 0) + 1);
+    }
+  }
+  return new Set([...seen].filter(([, count]) => count > 1).map(([key]) => key));
+}
+
+/** Takes off a page's running head, and returns where the page's content can start. */
+function withoutRunningHead(lines: Box[], height: number, heads: Set<string>): { lines: Box[]; contentTop: number } {
+  const row = topLines(lines, height);
+  if (!row.some((l) => heads.has(headKey(l.text)))) return { lines, contentTop: height * 0.05 };
+  // A page number next to the head is part of the same row.
+  return { lines: lines.filter((l) => !row.includes(l)), contentTop: Math.max(...row.map((l) => l.bottom)) };
+}
+
 const median = (values: number[]) => {
   const sorted = [...values].sort((a, b) => a - b);
   return sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
@@ -64,9 +114,11 @@ interface PageLayout {
   right: number;
   bodyHeight: number;
   twoColumn: boolean;
+  /** Where a figure with nothing above it can start. */
+  contentTop: number;
 }
 
-function analysePage(lines: Box[], width: number, height: number): PageLayout {
+export function analysePage(lines: Box[], width: number, height: number, contentTop = height * 0.05): PageLayout {
   const left = Math.min(width * 0.12, ...lines.map((l) => l.x0));
   const right = Math.max(width * 0.88, ...lines.map((l) => l.x1));
   const textWidth = right - left;
@@ -76,7 +128,7 @@ function analysePage(lines: Box[], width: number, height: number): PageLayout {
   const columnar = lines.filter((l) => l.x1 - l.x0 > textWidth * 0.3 && l.x1 - l.x0 < textWidth * 0.55 && l.text.length > 25);
   const inLeft = columnar.filter((l) => l.x1 < width / 2 + 4).length;
   const inRight = columnar.filter((l) => l.x0 > width / 2 - 4).length;
-  return { lines, width, height, left, right, bodyHeight, twoColumn: wide < 6 && inLeft >= 4 && inRight >= 4 };
+  return { lines, width, height, left, right, bodyHeight, twoColumn: wide < 6 && inLeft >= 4 && inRight >= 4, contentTop };
 }
 
 interface Region {
@@ -88,9 +140,12 @@ interface Region {
   bottom: number;
 }
 
+/** A band above a caption shorter than this can't hold a figure, so the figure must be below. */
+const CAPTION_ABOVE_BAND = 36;
+
 /** Finds caption lines, then the blank-of-prose band next to each one. */
-function findRegions(layout: PageLayout): Region[] {
-  const { lines, width, height, left, right, bodyHeight, twoColumn } = layout;
+export function findRegions(layout: PageLayout): Region[] {
+  const { lines, width, height, left, right, bodyHeight, twoColumn, contentTop } = layout;
   const regions: Region[] = [];
 
   for (const line of lines) {
@@ -123,26 +178,36 @@ function findRegions(layout: PageLayout): Region[] {
       .sort((a, b) => b.bottom - a.bottom);
     // Walk upward to the nearest prose, then back down over any short paragraph tail.
     const isNumberedHeading = (l: Box) => l.height >= bodyHeight * 0.98 && /^\d+(\.\d+)*\.?\s+[A-Z\u3400-\u9fff]/.test(l.text.trim());
-    const proseIndex = above.findIndex((l) => isProse(l) || isNumberedHeading(l) || CAPTION.test(l.text.trim()));
-    let top = height * 0.05;
-    if (proseIndex >= 0) {
-      top = above[proseIndex].bottom;
-      for (let i = proseIndex - 1; i >= 0; i--) {
-        const l = above[i];
-        if (l.top - top > l.height * 0.9 || Math.abs(l.height - bodyHeight) > bodyHeight * 0.3) break;
-        top = l.bottom;
+    const topOfBand = (stopsAt: (l: Box) => boolean) => {
+      const proseIndex = above.findIndex((l) => stopsAt(l) || isNumberedHeading(l) || CAPTION.test(l.text.trim()));
+      let top = contentTop;
+      if (proseIndex >= 0) {
+        top = above[proseIndex].bottom;
+        for (let i = proseIndex - 1; i >= 0; i--) {
+          const l = above[i];
+          if (l.top - top > l.height * 0.9 || Math.abs(l.height - bodyHeight) > bodyHeight * 0.3) break;
+          top = l.bottom;
+        }
       }
-    }
-    // An unnumbered section heading can sit right above a figure. Larger text further
-    // down is left alone, since it is more likely to be a label inside the figure.
-    const first = above.filter((l) => l.top >= top - 1).pop();
-    if (first && first.height > bodyHeight * 1.12 && first.x0 - x0 < 40 && first.x1 - first.x0 < columnWidth * 0.8) {
-      top = first.bottom;
+      // An unnumbered section heading can sit right above a figure. Larger text further
+      // down is left alone, since it is more likely to be a label inside the figure.
+      const first = above.filter((l) => l.top >= top - 1).pop();
+      if (first && first.height > bodyHeight * 1.12 && first.x0 - x0 < 40 && first.x1 - first.x0 < columnWidth * 0.8) {
+        top = first.bottom;
+      }
+      return top;
+    };
+    let top = topOfBand(isProse);
+    // A long line inside a figure can pass as prose and leave no room for the figure. It stands
+    // alone, while the lines of a paragraph share a left edge.
+    if (line.top - top < CAPTION_ABOVE_BAND) {
+      const proseLines = lines.filter((l) => sameColumn(l) && isProse(l));
+      top = topOfBand((l) => isProse(l) && proseLines.some((other) => other !== l && Math.abs(other.x0 - l.x0) < 3));
     }
     regions.push({ n: match[1], caption: caption.replace(/\s+/g, ' '), x0, x1, top: top + 1, bottom: line.top - 1 });
 
     // Some styles put the caption above the figure.
-    if (line.top - top < 36) {
+    if (line.top - top < CAPTION_ABOVE_BAND) {
       const after = below.filter((l) => l.top >= captionBottom - 1);
       const end = after.find((l) => isProse(l) || CAPTION.test(l.text.trim()));
       regions[regions.length - 1] = {
@@ -154,6 +219,9 @@ function findRegions(layout: PageLayout): Region[] {
   }
   return regions;
 }
+
+/** In rendered pixels, about five lines of body text. */
+const MIN_STRIP_HEIGHT = 150;
 
 const isInk = (data: Uint8ClampedArray, offset: number) =>
   data[offset + 3] > 16 && (data[offset] < 235 || data[offset + 1] < 235 || data[offset + 2] < 235);
@@ -214,8 +282,9 @@ function trimRegion(
   const width = maxX - minX;
   const height = maxY - minY;
   if (width < 80 || height < 50) return null;
-  // A long thin strip is a rule or a stray line of text, not a figure.
-  if (width / height > 6) return null;
+  // A long thin strip is a rule or a stray line of text, not a figure. Some charts are this
+  // shape too, but they're taller than a line or two of text.
+  if (width / height > 6 && height < MIN_STRIP_HEIGHT) return null;
   if (graphics < width * height * 0.002) return null;
   // The margin stays inside the band, or it would pull in the edge of the caption.
   const pad = 10;
@@ -246,13 +315,23 @@ export async function extractFigures(data: Uint8Array, outDir: string): Promise<
   const figures = new Map<string, PaperFigure>();
   try {
     mkdirSync(outDir, { recursive: true });
+    // A running head is only recognisable from the other pages, so all the text is read first.
+    const pages: { lines: Box[]; width: number; height: number }[] = [];
     for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber++) {
       const page = await doc.getPage(pageNumber);
       const { width, height } = page.getViewport({ scale: 1 });
       const content = await page.getTextContent();
-      const lines = layoutLines(content.items as any[], height);
-      const regions = findRegions(analysePage(lines, width, height)).filter((r) => !figures.has(r.n));
+      pages.push({ lines: withoutMarginNumbers(layoutLines(content.items as any[], height)), width, height });
+      page.cleanup();
+      await letOthersRun();
+    }
+    const heads = findRunningHeads(pages);
+    for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber++) {
+      const { width, height, ...read } = pages[pageNumber - 1];
+      const { lines, contentTop } = withoutRunningHead(read.lines, height, heads);
+      const regions = findRegions(analysePage(lines, width, height, contentTop)).filter((r) => !figures.has(r.n));
       if (regions.length) {
+        const page = await doc.getPage(pageNumber);
         const viewport = page.getViewport({ scale: RENDER_SCALE });
         const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
         const context = canvas.getContext('2d');
@@ -278,8 +357,8 @@ export async function extractFigures(data: Uint8Array, outDir: string): Promise<
             height: out.height,
           });
         }
+        page.cleanup();
       }
-      page.cleanup();
       await letOthersRun();
     }
   } finally {

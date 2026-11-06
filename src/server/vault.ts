@@ -333,6 +333,16 @@ export class Vault {
     return cached.version === version ? cached.figures : null;
   }
 
+  /** The figures the user removed, whichever version found them. */
+  removedFigures(id: string): Set<string> {
+    try {
+      const { figures } = readJson<{ figures: PaperFigure[] }>(join(this.figuresDir(id), 'figures.json'));
+      return new Set(figures.filter((f) => f.excluded).map((f) => f.n));
+    } catch {
+      return new Set();
+    }
+  }
+
   writeFigures(id: string, version: number, figures: PaperFigure[]): void {
     mkdirSync(this.figuresDir(id), { recursive: true });
     writeJson(join(this.figuresDir(id), 'figures.json'), { version, figures });

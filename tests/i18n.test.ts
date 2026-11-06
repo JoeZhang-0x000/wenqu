@@ -9,6 +9,8 @@ const CJK = /[㐀-鿿]/;
 /** Lines that hold Chinese on purpose, and are never shown as interface text. */
 const ALLOWED: Record<string, RegExp[]> = {
   'figures.ts': [/const CAPTION =/, /u3400|㐀/],
+  // Words for reading the captions of Chinese papers.
+  'cover.ts': [/const (STRONG|WEAK) =|对比/],
   'pdf.ts': [/test\(|abstract/i],
   // Patterns for reading Chinese papers.
   'repo-detect.ts': [/开源|基于|参考文献|㐀/],

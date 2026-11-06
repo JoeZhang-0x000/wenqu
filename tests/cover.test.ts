@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PaperFigure } from '../src/shared/types';
 import { Config } from '../src/server/config';
-import { COVER_VERSION, chooseCover, largestRasterShare, locateFirstFigurePage } from '../src/server/cover';
-import { extractFigures } from '../src/server/figures';
+import { COVER_VERSION, chooseCover, coverScore, largestRasterShare, locateFirstFigurePage, pickCoverFigure } from '../src/server/cover';
+import { FIGURES_VERSION, extractFigures } from '../src/server/figures';
 import { createApp, listen } from '../src/server/server';
 import type { Vault } from '../src/server/vault';
 
@@ -73,6 +73,59 @@ const figure = (n: string, page: number, extra: Partial<PaperFigure> = {}): Pape
   ...extra,
 });
 
+describe('pickCoverFigure', () => {
+  const pick = (figures: PaperFigure[], title = 'Bole: Tree Speculation') => pickCoverFigure(figures, title, () => true)?.n;
+
+  it('prefers the method over a result that comes first', () => {
+    const figures = [figure('1', 1, { caption: 'Speedup ratios of different methods.' }), figure('2', 3, { caption: 'Overview of the system. Each step is timed.' })];
+    expect(pick(figures)).toBe('2');
+  });
+
+  it('prefers an architecture to an illustration, and the earlier of two equals', () => {
+    const figures = [
+      figure('1', 1, { caption: 'Illustration of the cache.' }),
+      figure('2', 2, { caption: 'Our architecture.' }),
+      figure('3', 3, { caption: 'The pipeline.' }),
+    ];
+    expect(pick(figures)).toBe('2');
+  });
+
+  it('reads Chinese captions', () => {
+    expect(pick([figure('1', 1, { caption: '不同方法的吞吐对比。' }), figure('2', 2, { caption: '系统架构。' })])).toBe('2');
+  });
+
+  it('only reads the opening of a caption', () => {
+    const figures = [figure('1', 1, { caption: 'Cache states. An overview follows.' }), figure('2', 2, { caption: 'Latency results. See the overview.' })];
+    expect(coverScore(figures[0], '')).toBe(0);
+    expect(coverScore(figures[1], '')).toBeLessThan(0);
+  });
+
+  it('counts the name before the colon in the title', () => {
+    expect(coverScore(figure('1', 1, { caption: 'Bole architecture.' }), 'Bole: Tree Speculation')).toBe(4);
+    expect(coverScore(figure('1', 1, { caption: 'Bole architecture.' }), 'Tree Speculation')).toBe(3);
+  });
+
+  it('does not take a result for the method because it names the method or an architecture', () => {
+    expect(coverScore(figure('1', 1, { caption: 'Bole shifts rounds toward fuller budgets.' }), 'Bole: Tree Speculation')).toBe(0);
+    expect(coverScore(figure('1', 1, { caption: 'Impact of model architecture on performance.' }), '')).toBe(0);
+  });
+
+  it('keeps the first figure when nothing looks like the method', () => {
+    expect(pick([figure('1', 1, { caption: 'Cache hits.' }), figure('2', 2, { caption: 'Latency results.' })])).toBe('1');
+    expect(pick([figure('1', 1, { caption: 'Latency results.' }), figure('2', 2, { caption: 'Throughput results.' })])).toBe('1');
+  });
+
+  it('marks down a strip too thin to make out', () => {
+    const strip = figure('1', 1, { caption: 'Overview.', width: 900, height: 200 });
+    const block = figure('2', 2, { caption: 'Overview.', width: 500, height: 400 });
+    expect(pick([strip, block])).toBe('2');
+  });
+
+  it('skips a removed figure, however good its caption', () => {
+    expect(pick([figure('1', 1, { caption: 'Cache hits.' }), figure('2', 2, { caption: 'Overview.', excluded: true })])).toBe('1');
+  });
+});
+
 describe('chooseCover', () => {
   const never = async () => {
     throw new Error('should not need to look');
@@ -80,31 +133,31 @@ describe('chooseCover', () => {
 
   it('takes the crop on the lowest page, then with the lowest number', async () => {
     const figures = [figure('1', 5), figure('10', 2), figure('2', 2)];
-    expect(await chooseCover(figures, () => true, never)).toEqual({ figure: 'fig-2.png', page: 2 });
+    expect(await chooseCover(figures, '', () => true, never)).toEqual({ figure: 'fig-2.png', page: 2 });
   });
 
   it('skips a figure the user removed', async () => {
     const figures = [figure('1', 2, { excluded: true }), figure('2', 4)];
-    expect(await chooseCover(figures, () => true, never)).toEqual({ figure: 'fig-2.png', page: 4 });
+    expect(await chooseCover(figures, '', () => true, never)).toEqual({ figure: 'fig-2.png', page: 4 });
   });
 
   it('skips a crop whose file is gone', async () => {
     const figures = [figure('1', 2), figure('2', 4)];
-    expect(await chooseCover(figures, (file) => file !== 'fig-1.png', never)).toEqual({ figure: 'fig-2.png', page: 4 });
+    expect(await chooseCover(figures, '', (file) => file !== 'fig-1.png', never)).toEqual({ figure: 'fig-2.png', page: 4 });
   });
 
   it('uses the known page when no crop is usable, without scanning', async () => {
-    expect(await chooseCover([figure('1', 3, { excluded: true })], () => true, never)).toEqual({ page: 3 });
-    expect(await chooseCover([figure('1', 7)], () => false, never)).toEqual({ page: 7 });
+    expect(await chooseCover([figure('1', 3, { excluded: true })], '', () => true, never)).toEqual({ page: 3 });
+    expect(await chooseCover([figure('1', 7)], '', () => false, never)).toEqual({ page: 7 });
   });
 
   it('locates the page when nothing was extracted', async () => {
-    expect(await chooseCover([], () => true, async () => 6)).toEqual({ page: 6 });
+    expect(await chooseCover([], '', () => true, async () => 6)).toEqual({ page: 6 });
   });
 
   it('falls back to page 1 when nothing is found, or the search fails', async () => {
-    expect(await chooseCover([], () => true, async () => null)).toEqual({ page: 1 });
-    expect(await chooseCover([], () => true, never)).toEqual({ page: 1 });
+    expect(await chooseCover([], '', () => true, async () => null)).toEqual({ page: 1 });
+    expect(await chooseCover([], '', () => true, never)).toEqual({ page: 1 });
   });
 });
 
@@ -219,7 +272,7 @@ describe('cover routes', () => {
     expect(await plan(id)).toEqual({ settled: false, figure: 'fig-1.png', page: 1 });
     expect(await plan(id)).toEqual({ settled: false, figure: 'fig-1.png', page: 1 });
     expect(canvas.extractions).toBe(1);
-    expect(vault.readFigures(id, 1)).not.toBeNull();
+    expect(vault.readFigures(id, FIGURES_VERSION)).not.toBeNull();
   });
 
   it('settles once a cover is uploaded, without looking at the paper again', async () => {
@@ -258,6 +311,29 @@ describe('cover routes', () => {
     await upload(id, 'kind=figure&page=1');
     expect(readFileSync(vault.thumbPath(id))).toEqual(jpeg);
     expect(vault.getPaper(id).coverStale).toBe(false);
+  });
+
+  it('keeps what the user removed when better detection extracts again', async () => {
+    const id = await addPaper();
+    await plan(id);
+    await exclude(id, '1');
+    const file = join(vault.figuresDir(id), 'figures.json');
+    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), version: FIGURES_VERSION - 1 }));
+    const { figures } = (await (await fetch(`${base}/api/papers/${id}/figures`)).json()) as { figures: PaperFigure[] };
+    expect(figures.find((f) => f.n === '1')?.excluded).toBe(true);
+    expect(figures.find((f) => f.n === '3.1')?.excluded).toBeUndefined();
+  });
+
+  it('chooses again when the figure on the cover is removed, and not for another one', async () => {
+    const id = await addPaper();
+    await plan(id);
+    const figures = vault.readFigures(id, FIGURES_VERSION)!;
+    vault.writeFigures(id, FIGURES_VERSION, figures.map((f) => (f.n === '3.1' ? { ...f, caption: 'Overview of the system.' } : f)));
+    await upload(id, 'kind=figure&page=2');
+    await exclude(id, '1');
+    expect(vault.getPaper(id).coverStale).toBe(false);
+    await exclude(id, '3.1');
+    expect(vault.getPaper(id).coverStale).toBe(true);
   });
 
   it('chooses again only when the version moves', async () => {

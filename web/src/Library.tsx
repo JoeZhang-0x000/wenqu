@@ -1,4 +1,4 @@
-import { AudioLines, Check, FileText, Layers, Link2, Plus, Search, Tag, Upload } from 'lucide-react';
+import { AudioLines, Check, FileText, Layers, LayoutGrid, Link2, Plus, Rows3, Search, Tag, Upload } from 'lucide-react';
 import { getLocale, t } from '../../src/shared/i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { countTags, type PaperSummary } from '../../src/shared/types';
@@ -29,11 +29,33 @@ const filters = (): { id: Filter; label: string }[] => [
 /** Enough to find the common ones without the row taking over the page. */
 const TAGS_SHOWN = 12;
 const TAGS_ON_CARD = 3;
+const AUTHORS_IN_FEED = 4;
+
+/** Cards are for scanning a lot of papers, and the feed gives each one room for its abstract. */
+type View = 'cards' | 'feed';
+const VIEW_KEY = 'wenqu-library-view';
+
+function savedView(): View {
+  try {
+    return localStorage.getItem(VIEW_KEY) === 'feed' ? 'feed' : 'cards';
+  } catch {
+    return 'cards';
+  }
+}
+
+function saveView(view: View) {
+  try {
+    localStorage.setItem(VIEW_KEY, view);
+  } catch {
+    /* The choice just lasts until the next load. */
+  }
+}
 
 export function Library() {
   const { data: papers } = useFetch<PaperSummary[]>('/papers');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
+  const [view, setView] = useState<View>(savedView);
   const [chosenTags, setChosenTags] = useState<string[]>([]);
   const [chosenUntagged, setChosenUntagged] = useState(false);
   const [allTagsShown, setAllTagsShown] = useState(false);
@@ -92,6 +114,26 @@ export function Library() {
           <Search size={14} />
           <input placeholder={t('搜索标题、作者、摘要')} value={query} onChange={(e) => setQuery(e.target.value)} />
         </div>
+        <div className="shelf-view" role="group" aria-label={t('书架视图')}>
+          {[
+            { id: 'cards' as const, label: t('卡片流'), icon: <LayoutGrid size={15} /> },
+            { id: 'feed' as const, label: t('瀑布流'), icon: <Rows3 size={15} /> },
+          ].map((option) => (
+            <button
+              key={option.id}
+              className={view === option.id ? 'on' : ''}
+              title={option.label}
+              aria-label={option.label}
+              aria-pressed={view === option.id}
+              onClick={() => {
+                setView(option.id);
+                saveView(option.id);
+              }}
+            >
+              {option.icon}
+            </button>
+          ))}
+        </div>
         <button
           className={`btn ${selected ? 'on' : ''}`}
           disabled={(papers?.length ?? 0) < 2}
@@ -138,11 +180,12 @@ export function Library() {
           )}
         </div>
       )}
-      <div className="shelf">
+      <div className={`shelf ${view}`}>
         {visible.map((p) => (
           <PaperCard
             key={p.id}
             paper={p}
+            view={view}
             selected={selected ? selected.includes(p.id) : undefined}
             activeTags={activeTags}
             onTag={toggleTag}
@@ -177,7 +220,7 @@ export function Library() {
   );
 }
 
-/** A paper's first figure, or a page. The image is made once in the browser, then kept in the vault. */
+/** A paper's figure, or a page. The image is made once in the browser, then kept in the vault. */
 export function PaperCover({ paper }: { paper: PaperSummary }) {
   const ref = useRef<HTMLDivElement>(null);
   const [updated, setUpdated] = useState<string>();
@@ -209,18 +252,24 @@ export function PaperCover({ paper }: { paper: PaperSummary }) {
 
 function PaperCard({
   paper,
+  view,
   selected,
   activeTags,
   onTag,
   onToggle,
 }: {
   paper: PaperSummary;
+  view: View;
   selected?: boolean;
   activeTags: string[];
   onTag(tag: string): void;
   onToggle(): void;
 }) {
   const selecting = selected !== undefined;
+  const feed = view === 'feed';
+  // Authors read from a PDF can include stray punctuation.
+  const authors = paper.authors.filter((name) => /\p{L}/u.test(name));
+  const shownAuthors = authors.slice(0, feed ? AUTHORS_IN_FEED : 1);
   return (
     <a
       className={`card ${selected ? 'selected' : ''}`}
@@ -242,11 +291,12 @@ function PaperCard({
           </div>
         )}
       </div>
-      <div className="card-title serif">{paper.title}</div>
+      <div className="card-title serif" title={paper.title}>{paper.title}</div>
       <div className="card-meta muted">
-        {paper.authors[0] && <span>{paper.authors[0]}{paper.authors.length > 1 ? t(' 等') : ''}</span>}
+        {shownAuthors.length > 0 && <span>{shownAuthors.join(', ')}{authors.length > shownAuthors.length ? t(' 等') : ''}</span>}
         {paper.year && <span className="mono">{paper.year}</span>}
       </div>
+      {feed && paper.abstract && <p className="card-abstract">{paper.abstract}</p>}
       {paper.tags.length > 0 && (
         <div className="card-tags">
           {/* Inside a link, so these stay plain text for assistive tech. The row above the shelf does the same job by keyboard. */}
