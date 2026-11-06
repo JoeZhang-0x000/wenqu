@@ -25,7 +25,7 @@ Wenqu turns papers into podcasts you can listen to at any time, so reading no lo
   <a href="https://www.deepseek.com/en/harness/"><img src="docs/images/backends/deepseek.svg" height="18" align="absmiddle" alt=""> DeepSeek Harness</a>
 </p>
 
-![A 30-second tour: opening a paper from the library, clicking a page citation in an answer to jump to that page, selecting a passage, playing a podcast episode, and the assistant answering a research question](docs/images/tour.gif)
+![A 30-second tour: switching the library from cards to a feed, opening a paper, clicking a page citation in an answer to jump to that page, selecting a passage, playing a podcast episode, and the assistant answering a research question](docs/images/tour.gif)
 
 ## What it does
 

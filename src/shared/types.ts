@@ -285,7 +285,7 @@ export type CoverPlan =
       settled: false;
       /** File name of a cropped figure, when there is one to use. */
       figure?: string;
-      /** The page holding the first figure, or page 1 when none was found. */
+      /** The page holding that figure or the first one, or page 1 when none was found. */
       page: number;
     };
 

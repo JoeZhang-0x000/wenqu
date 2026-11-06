@@ -27,7 +27,7 @@ const jpeg = (canvas: HTMLCanvasElement, quality: number) =>
     canvas.toBlob((b) => (b ? resolve(b) : reject(new Error(t('无法生成封面')))), 'image/jpeg', quality),
   );
 
-/** A whole page, which the card shows from the top. */
+/** A whole page, of which a card shows the top. */
 export async function renderPageCover(paperId: string, pageNumber: number): Promise<Blob> {
   const { pdfjs } = await loadPdfjs();
   const task = pdfjs.getDocument(documentOptions(`/api/papers/${paperId}/pdf`) as any);
@@ -35,7 +35,7 @@ export async function renderPageCover(paperId: string, pageNumber: number): Prom
     const doc = await task.promise;
     const page = await doc.getPage(pageNumber);
     const base = page.getViewport({ scale: 1 });
-    const viewport = page.getViewport({ scale: 480 / base.width });
+    const viewport = page.getViewport({ scale: 720 / base.width });
     const canvas = document.createElement('canvas');
     canvas.width = viewport.width;
     canvas.height = viewport.height;
@@ -47,7 +47,7 @@ export async function renderPageCover(paperId: string, pageNumber: number): Prom
 }
 
 /**
- * A cropped figure, centred on a white image with the card's proportions. The white is part
+ * A cropped figure, centred on a white image with the proportions of `.cover`. The white is part
  * of the image, so a card shows this and a whole page the same way and nothing gets cut off.
  */
 export async function renderFigureCover(paperId: string, file: string): Promise<Blob> {
@@ -55,12 +55,12 @@ export async function renderFigureCover(paperId: string, file: string): Promise<
   image.src = `/api/papers/${paperId}/figures/${file}`;
   await image.decode();
   const canvas = document.createElement('canvas');
-  canvas.width = 600;
-  canvas.height = 800;
+  canvas.width = 800;
+  canvas.height = 600;
   const context = canvas.getContext('2d')!;
   context.fillStyle = '#fff';
   context.fillRect(0, 0, canvas.width, canvas.height);
-  const margin = canvas.width * 0.05;
+  const margin = canvas.height * 0.04;
   const scale = Math.min((canvas.width - margin * 2) / image.naturalWidth, (canvas.height - margin * 2) / image.naturalHeight);
   const width = image.naturalWidth * scale;
   const height = image.naturalHeight * scale;

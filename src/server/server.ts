@@ -30,7 +30,7 @@ import { detectAgents } from './harness.js';
 import { applyUpdate, updateStatus } from './update.js';
 import { importArxiv, lookupArxiv, searchArxiv } from './arxiv.js';
 import { Config, expandHome, repoCacheDir } from './config.js';
-import { chooseCover, locateFirstFigurePage } from './cover.js';
+import { chooseCover, locateFirstFigurePage, pickCoverFigure } from './cover.js';
 import { DoubaoError, synthesizePodcast } from './doubao.js';
 import { FIGURES_VERSION, byPosition, extractFigures, figurePath, figuresSupported, inlineFigures, keepKnownFigures } from './figures.js';
 import { Jobs, type JobContext } from './jobs.js';
@@ -363,8 +363,11 @@ export function createApp({ config, devOrigin, restart, repos: repoOptions }: Ap
     const work = inTurn(async () => {
       if (!(await figuresSupported())) return [];
       const dir = vault.figuresDir(paperId);
+      // Better detection doesn't undo what the user removed.
+      const removed = vault.removedFigures(paperId);
       rmSync(dir, { recursive: true, force: true });
-      const figures = await extractFigures(new Uint8Array(readFileSync(vault.pdfPath(paperId))), dir);
+      const extracted = await extractFigures(new Uint8Array(readFileSync(vault.pdfPath(paperId))), dir);
+      const figures = extracted.map((f) => (removed.has(f.n) ? { ...f, excluded: true } : f));
       vault.writeFigures(paperId, FIGURES_VERSION, figures);
       return figures;
     })
@@ -391,8 +394,9 @@ export function createApp({ config, devOrigin, restart, repos: repoOptions }: Ap
     const figures = before.map((f) => (f.n === req.params.n ? { ...f, excluded: Boolean(req.body?.excluded) } : f));
     vault.writeFigures(req.params.id, FIGURES_VERSION, figures);
     // Removing a figure means its crop is bad, so it can't stay on the cover. Other edits leave the cover alone.
-    const first = (list: PaperFigure[]) => list.filter((f) => !f.excluded).sort(byPosition)[0]?.n;
-    if (first(before) !== first(figures)) vault.invalidateCover(req.params.id);
+    const { title } = vault.getPaper(req.params.id);
+    const pick = (list: PaperFigure[]) => pickCoverFigure(list, title, () => true)?.n;
+    if (pick(before) !== pick(figures)) vault.invalidateCover(req.params.id);
     res.json(figures);
   });
 
@@ -412,6 +416,7 @@ export function createApp({ config, devOrigin, restart, repos: repoOptions }: Ap
       .catch(() => [] as PaperFigure[]);
     const choice = await chooseCover(
       figures,
+      paper.title,
       (file) => existsSync(join(vault.figuresDir(paperId), file)),
       () => inTurn(() => locateFirstFigurePage(new Uint8Array(readFileSync(vault.pdfPath(paperId))))),
     );

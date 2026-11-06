@@ -24,7 +24,7 @@
   <a href="https://www.deepseek.com/en/harness/"><img src="docs/images/backends/deepseek.svg" height="18" align="absmiddle" alt=""> DeepSeek Harness</a>
 </p>
 
-![30 秒演示：从书架打开论文，点击回答里的页码跳到原文，选中一段文字，播放播客，再到助手页看一个研究问题的回答](docs/images/zh/tour.gif)
+![30 秒演示：把书架从卡片流切换到瀑布流，打开论文，点击回答里的页码跳到原文，选中一段文字，播放播客，再到助手页看一个研究问题的回答](docs/images/zh/tour.gif)
 
 ## 能做什么
 
