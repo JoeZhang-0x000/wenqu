@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { ASSISTANT_OWNER, parseReply } from '../shared/assistant.js';
+import { ASSISTANT_OWNER, parseReply, withRepairedTags, withoutImaginedResults } from '../shared/assistant.js';
 import { t } from '../shared/i18n.js';
 import {
   BLOG_STYLES,
@@ -27,7 +27,9 @@ import {
 import { parseArxivInput } from './arxiv.js';
 import type { AgentRequest } from './agents.js';
 import type { JobContext, Jobs } from './jobs.js';
-import { assistantPrompt } from './prompts.js';
+import { assistantPrompt, type AssistantPaper } from './prompts.js';
+import { RepoToolError, type RepoReader } from './repo.js';
+import { lineArg, runRepoTool } from './repo-chat.js';
 import { BadRequest, NotFound, newOutputId, withoutArxivVersion, type Vault } from './vault.js';
 
 /** One request from the user, including every read and retry the agent needs along the way. */
@@ -37,6 +39,8 @@ const MAX_COLLECTION_PAPERS = 12;
 const MAX_LISTED_PAPERS = 200;
 const MAX_READ_CHARS = 30_000;
 const MAX_SEARCH_RESULTS = 25;
+/** A passage selected in the PDF, quoted along with a question. */
+const MAX_SELECTION_CHARS = 4000;
 /** Generating is slow and each one runs an agent, so a batch runs a few at a time. */
 const GENERATION_CONCURRENCY = 3;
 
@@ -52,6 +56,16 @@ export interface AssistantDeps {
   startBlog(ownerId: string, body: Record<string, unknown>): { job: Job; blogId: string };
   startPodcast(ownerId: string, body: Record<string, unknown>): { job: Job; podcastId: string };
   synthesize(ownerId: string, podcastId: string): Job;
+  /** What a chat beside a paper sees of it, including its repository when that is switched on. */
+  paperFor(paperId: string): AssistantPaper;
+  /** The paper's linked repository at its pinned commit, fetched again if the clone has gone. Throws if it can't be read. */
+  repoReader(paperId: string, signal: AbortSignal): Promise<RepoReader>;
+}
+
+/** Where a user's message in a chat beside a paper points into it. */
+export interface Quote {
+  selection?: unknown;
+  page?: unknown;
 }
 
 type Args = Record<string, unknown>;
@@ -77,6 +91,7 @@ interface PrepareContext {
   lookups: Map<string, ArxivLookup>;
   /** What is already waiting for the user in this chat. */
   pending: AssistantAction[];
+  session: AssistantSession;
 }
 
 interface Tool {
@@ -85,6 +100,8 @@ interface Tool {
   doc: string;
   /** Long-running tools may run alongside each other within a batch. */
   long?: boolean;
+  /** Only offered beside a paper whose linked repository is switched on. */
+  repo?: boolean;
   /** Validates the arguments and describes the action, with no side effects. */
   prepare(args: Args, ctx: PrepareContext): Promise<Prepared> | Prepared;
   run(args: Args, ctx: JobContext, session: AssistantSession): Promise<Outcome> | Outcome;
@@ -175,16 +192,25 @@ export class Assistant {
 
   // Sessions ----------------------------------------------------------------
 
-  list(): AssistantSessionMeta[] {
-    return this.vault.listAssistantSessions().map((stored) => {
-      const session = this.settleInterrupted(stored);
-      const { messages, allowReads: _allowReads, ...meta } = session;
-      return { ...meta, pending: pendingActions(session).length };
-    });
+  /** Every chat, or only those beside one paper. */
+  list(filter: { paperId?: string } = {}): AssistantSessionMeta[] {
+    const titles = new Map(this.vault.listPapers().map((p) => [p.id, p.title]));
+    return this.vault
+      .listAssistantSessions()
+      .filter((s) => !filter.paperId || s.paperId === filter.paperId)
+      .map((stored) => {
+        const session = this.settleInterrupted(stored);
+        const { messages, allowReads: _allowReads, ...meta } = session;
+        return { ...meta, ...(session.paperId ? { paperTitle: titles.get(session.paperId) } : {}), pending: pendingActions(session).length };
+      });
   }
 
   get(id: string): AssistantSession {
-    return this.withCurrentHits(this.settleInterrupted(this.vault.getAssistantSession(id)));
+    const session = this.withCurrentHits(this.settleInterrupted(this.vault.getAssistantSession(id)));
+    if (!session.paperId) return session;
+    // Shown, never stored, because the title can change.
+    const paperTitle = this.vault.listPapers().find((p) => p.id === session.paperId)?.title;
+    return paperTitle ? { ...session, paperTitle } : session;
   }
 
   /** Search results are kept as they were found, but whether each is in the library can change. */
@@ -226,12 +252,15 @@ export class Assistant {
     return next;
   }
 
-  create(message: string, harness: AgentBackend, model: string, thinking: string) {
+  /** A chat given a paper sits beside it: it sees that paper, and messages can quote it. */
+  create(message: string, harness: AgentBackend, model: string, thinking: string, scope: { paperId?: string } & Quote = {}) {
     const text = requireMessage(message);
+    if (scope.paperId) this.vault.getPaper(scope.paperId);
     const now = new Date().toISOString();
     const session: AssistantSession = {
       id: newOutputId(),
       title: clip(text.replace(/\s+/g, ' '), 60),
+      ...(scope.paperId ? { paperId: scope.paperId } : {}),
       harness,
       model,
       thinking,
@@ -242,15 +271,17 @@ export class Assistant {
       messages: [],
     };
     this.vault.saveAssistantSession(session);
-    this.addMessage(session.id, { role: 'user', content: text, at: now });
-    return { sessionId: session.id, job: this.startTurn(session.id, text) };
+    const user: AssistantMessage = { role: 'user', content: text, ...quoteOf(session, scope), at: now };
+    this.addMessage(session.id, user);
+    return { sessionId: session.id, job: this.startTurn(session.id, text), message: user };
   }
 
-  send(id: string, message: string) {
+  send(id: string, message: string, quote: Quote = {}) {
     const text = requireMessage(message);
     this.assertIdle(id);
-    this.addMessage(id, { role: 'user', content: text, at: new Date().toISOString() });
-    return { job: this.startTurn(id, text) };
+    const user: AssistantMessage = { role: 'user', content: text, ...quoteOf(this.vault.getAssistantSession(id), quote), at: new Date().toISOString() };
+    this.addMessage(id, user);
+    return { job: this.startTurn(id, text), message: user };
   }
 
   /**
@@ -317,7 +348,8 @@ export class Assistant {
   }
 
   update(id: string, patch: { model?: string; thinking?: string }): AssistantSession {
-    return this.mutate(id, (session) => Object.assign(session, patch));
+    this.mutate(id, (session) => Object.assign(session, patch));
+    return this.get(id);
   }
 
   remove(id: string): void {
@@ -359,8 +391,9 @@ export class Assistant {
   // A turn ------------------------------------------------------------------
 
   private startTurn(id: string, label: string, approved: string[] = [], thenAskAgent = true): Job {
+    const paperId = this.vault.getAssistantSession(id).paperId;
     return this.deps.jobs.start(
-      { kind: 'assistant', paperId: ASSISTANT_OWNER, targetId: id, label: t('助手：{title}', { title: clip(label, 40) }) },
+      { kind: 'assistant', paperId: paperId ?? ASSISTANT_OWNER, targetId: id, label: t('助手：{title}', { title: clip(label, 40) }) },
       async (ctx) => {
         await this.runActions(id, approved, ctx);
         if (thenAskAgent) await this.converse(id, ctx);
@@ -386,22 +419,29 @@ export class Assistant {
   private async converse(id: string, ctx: JobContext): Promise<void> {
     for (let step = 0; step < MAX_STEPS; step++) {
       const session = this.vault.getAssistantSession(id);
+      // Read again each step, since the paper or its repository can change while the agent works.
+      const paper = session.paperId ? this.deps.paperFor(session.paperId) : undefined;
+      const repo = paper && !('missing' in paper) ? paper.repo : undefined;
       const raw = await this.deps.runAgent({
         backend: session.harness,
         model: session.model || undefined,
         thinking: session.thinking || undefined,
         ...assistantPrompt({
-          tools: this.toolDocs(),
+          tools: this.toolDocs(Boolean(repo)),
           messages: session.messages,
           today: new Date().toISOString().slice(0, 10),
+          paper,
         }),
         onDelta: ctx.delta,
         signal: ctx.signal,
       });
-      const { text, calls, error, suggestions } = parseReply(raw);
+      // Models sometimes write out what they expect a tool to return, or garble the block's name.
+      const cleaned = withoutImaginedResults(raw);
+      const imagined = cleaned !== raw;
+      const { text, calls, error, suggestions } = parseReply(withRepairedTags(cleaned));
       // A reply holding nothing but suggestions has no answer to show them under.
-      if (!text && !calls.length && !error) throw new Error(t('{agent} 没有返回内容。{detail}', { agent: session.harness, detail: '' }));
-      const actions = await this.prepareAll(calls, session, error);
+      if (!text && !calls.length && !error && !imagined) throw new Error(t('{agent} 没有返回内容。{detail}', { agent: session.harness, detail: '' }));
+      const actions = await this.prepareAll(calls, session, { error, imagined, repo: Boolean(repo) });
       ctx.signal.throwIfAborted();
       this.addMessage(id, {
         role: 'assistant',
@@ -409,7 +449,8 @@ export class Assistant {
         content: text || (actions.length ? '' : t('这些操作还在等你批准。')),
         actions: actions.length ? actions : undefined,
         // A card still waiting means the turn isn't over, whatever this reply says.
-        suggestions: suggestions.length && !pendingActions(session).length ? suggestions : undefined,
+        suggestions: suggestions.length && !imagined && !pendingActions(session).length ? suggestions : undefined,
+        ...(repo ? { repo: { owner: repo.owner, name: repo.name, sha: repo.sha } } : {}),
         agent: [session.harness, session.model, session.thinking].filter(Boolean).join(' · '),
         at: new Date().toISOString(),
       });
@@ -433,7 +474,11 @@ export class Assistant {
   }
 
   /** Bad requests become failed actions that go back to the agent. They never reach the user to approve. */
-  private async prepareAll(calls: { tool: string; args: Args }[], session: AssistantSession, error?: string): Promise<AssistantAction[]> {
+  private async prepareAll(
+    calls: { tool: string; args: Args }[],
+    session: AssistantSession,
+    { error, imagined = false, repo = false }: { error?: string; imagined?: boolean; repo?: boolean } = {},
+  ): Promise<AssistantAction[]> {
     const failed = (tool: string, args: Args, result: string, access: AssistantAccess = 'external'): AssistantAction => ({
       id: randomBytes(6).toString('hex'),
       tool,
@@ -445,20 +490,30 @@ export class Assistant {
     });
     const actions: AssistantAction[] = [];
     if (error) actions.push(failed('invalid', {}, `${error} Nothing in that block was run. Write it again as valid JSON.`));
+    if (imagined) {
+      actions.push(
+        failed(
+          'not_a_real_result',
+          {},
+          `${calls.length ? 'Only the requests inside the block ran.' : 'Nothing was run.'} You wrote tool results yourself. Only the app writes results, after you stop, so anything you wrote isn't real. To act, end your reply with a block and stop there.`,
+        ),
+      );
+    }
     // A model that loses track of its format can repeat itself, and the user shouldn't approve the same thing twice.
     calls = calls.filter((call, i) => calls.findIndex((other) => JSON.stringify(other) === JSON.stringify(call)) === i);
     const inputs = calls.flatMap((c) => (c.tool === 'add_arxiv' && typeof c.args.input === 'string' ? [c.args.input.trim()] : []));
     const lookups = inputs.length ? await this.deps.lookupArxiv(this.vault, [...new Set(inputs)]) : [];
     const pending = pendingActions(session);
-    const ctx: PrepareContext = { incoming: new Map(), lookups: new Map(lookups.map((l) => [l.input, l])), pending };
+    const ctx: PrepareContext = { incoming: new Map(), lookups: new Map(lookups.map((l) => [l.input, l])), pending, session };
     for (const [index, call] of calls.entries()) {
       if (index >= MAX_ACTIONS_PER_REPLY) {
         actions.push(failed('too_many', {}, `Only the first ${MAX_ACTIONS_PER_REPLY} actions were accepted. Ask for the rest once those are finished.`));
         break;
       }
       const tool = Object.hasOwn(this.tools, call.tool) ? this.tools[call.tool] : undefined;
-      if (!tool) {
-        actions.push(failed(call.tool, call.args, `There is no tool called "${call.tool}".`));
+      if (!tool || (tool.repo && !repo)) {
+        const reason = tool ? 'No repository is in use beside a paper in this chat, so there is no code to read.' : `There is no tool called "${call.tool}".`;
+        actions.push(failed(call.tool, call.args, reason));
         continue;
       }
       try {
@@ -515,7 +570,8 @@ export class Assistant {
     } catch (err) {
       if (ctx.signal.aborted) throw err;
       const message = (err as Error).message;
-      this.patchAction(id, action.id, { status: 'failed', result: message, note: message, retry: 'ready' });
+      // A request the agent got wrong would fail the same way again, so it isn't offered for retrying.
+      this.patchAction(id, action.id, { status: 'failed', result: message, note: message, ...(err instanceof ToolError ? {} : { retry: 'ready' as const }) });
     }
   }
 
@@ -533,8 +589,9 @@ export class Assistant {
 
   // Tools -------------------------------------------------------------------
 
-  private toolDocs(): string {
+  private toolDocs(repo: boolean): string {
     return Object.entries(this.tools)
+      .filter(([, tool]) => repo || !tool.repo)
       .map(([name, tool]) => `- ${name}${tool.access === 'write' ? ' [approval]' : tool.access === 'read' ? ' [may need approval]' : ''}: ${tool.doc}`)
       .join('\n');
   }
@@ -568,7 +625,8 @@ export class Assistant {
   }
 
   private assertUnused(paperId: string): void {
-    if (this.deps.jobs.list().some((j) => j.paperId === paperId && j.status === 'running')) {
+    // A chat beside the paper records it on its own job, and doesn't keep the paper in use.
+    if (this.deps.jobs.list().some((j) => j.paperId === paperId && j.status === 'running' && j.kind !== 'assistant')) {
       throw new BadRequest(t('这篇论文还有任务在运行'));
     }
   }
@@ -1010,6 +1068,45 @@ export class Assistant {
         },
       },
 
+      list_dir: {
+        access: 'repo',
+        repo: true,
+        doc: 'Lists a directory of the repository linked to the paper being read. args: path? (relative to the repository root, "" for the root), recursive? (true to include everything under it).',
+        prepare: (args) => {
+          const path = stringArg(args, 'path', 500) ?? '';
+          return { args: defined({ path, recursive: args.recursive === true || undefined }), summary: t('查看代码目录：{path}', { path: path || '/' }) };
+        },
+        run: (args, ctx, session) => this.readRepo(session, 'list_dir', args, ctx),
+      },
+
+      read_file: {
+        access: 'repo',
+        repo: true,
+        doc: 'Reads a file of the linked repository with line numbers, up to 400 lines at a time. args: path, start_line?, end_line?.',
+        prepare: (args) => {
+          const path = requireString(args, 'path', 500);
+          const start = lineArg(args.start_line);
+          const end = lineArg(args.end_line);
+          const where = start || end ? `${path}:${start ?? 1}-${end ?? ''}` : path;
+          return { args: defined({ path, start_line: start, end_line: end }), summary: t('读取代码：{path}', { path: where }) };
+        },
+        run: (args, ctx, session) => this.readRepo(session, 'read_file', args, ctx),
+      },
+
+      search_code: {
+        access: 'repo',
+        repo: true,
+        doc: 'Searches every text file of the linked repository with git grep, ignoring case. args: query, path? (limits it to a directory or file), regex? (true to read the query as an extended regular expression).',
+        prepare: (args) => {
+          const query = requireString(args, 'query', 300);
+          return {
+            args: defined({ query, path: stringArg(args, 'path', 500), regex: args.regex === true || undefined }),
+            summary: t('搜索代码：{query}', { query }),
+          };
+        },
+        run: (args, ctx, session) => this.readRepo(session, 'search_code', args, ctx),
+      },
+
       withdraw_action: {
         access: 'catalog',
         doc: 'Takes back one of your actions that is still waiting for approval, using the id on its result. Use it when the user no longer wants it, or to replace it with a corrected one. args: action.',
@@ -1030,6 +1127,18 @@ export class Assistant {
         },
       },
     };
+  }
+
+  /** Reads the repository linked to the chat's paper, as it is when the action runs. */
+  private async readRepo(session: AssistantSession, tool: string, args: Args, ctx: JobContext): Promise<Outcome> {
+    if (!session.paperId) throw new ToolError('This chat is not beside a paper, so there is no repository to read.');
+    const reader = await this.deps.repoReader(session.paperId, ctx.signal);
+    try {
+      return { result: await runRepoTool(reader, tool, args, ctx.signal) };
+    } catch (err) {
+      if (err instanceof RepoToolError) throw new ToolError(err.message);
+      throw err;
+    }
   }
 
   /** Like `resolveOwner`, for tools that only make sense for a paper. */
@@ -1063,6 +1172,13 @@ export class Assistant {
     }
     return [...inDetails, ...inText];
   }
+}
+
+/** Only a chat beside a paper can quote it. Whatever arrives, this is a bounded passage and a page number. */
+function quoteOf(session: AssistantSession, { selection, page }: Quote): Pick<AssistantMessage, 'selection' | 'page'> {
+  if (!session.paperId || typeof selection !== 'string' || !selection.trim()) return {};
+  const ok = typeof page === 'number' && Number.isInteger(page) && page > 0;
+  return { selection: clip(selection.trim(), MAX_SELECTION_CHARS), ...(ok ? { page } : {}) };
 }
 
 function requireMessage(message: string): string {

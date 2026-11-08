@@ -380,6 +380,7 @@ export interface Podcast {
   updatedAt: string;
 }
 
+/** A reader chat message from before the reader chat ran on the assistant. Only kept for moving old chats over. */
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
@@ -406,10 +407,11 @@ export interface ArxivHit extends ArxivMeta {
 
 /**
  * `catalog` only looks at the library's details (titles, authors, abstracts) or this chat's own requests,
- * `read` looks inside papers, `write` changes the library, and `external` only asks arXiv.
+ * `read` looks inside papers, `write` changes the library, `external` only asks arXiv, and `repo` reads
+ * the repository linked to the paper a reader chat is about, at its pinned commit.
  * Whether an action waits for the user follows from this, never from the agent.
  */
-export type AssistantAccess = 'catalog' | 'read' | 'write' | 'external';
+export type AssistantAccess = 'catalog' | 'read' | 'write' | 'external' | 'repo';
 export type AssistantActionStatus = 'pending' | 'approved' | 'running' | 'done' | 'failed' | 'rejected' | 'canceled';
 
 export interface AssistantAction {
@@ -446,12 +448,25 @@ export interface AssistantMessage {
   error?: boolean;
   /** What the user might send next, from a turn's final reply. Never part of `content`. */
   suggestions?: string[];
+  /** Text the user had selected in the PDF when asking, in a chat about a paper. */
+  selection?: string;
+  page?: number;
+  /** The repository and commit this reply could read, which its code citations point at. */
+  repo?: RepoRef;
+  /** Files read for this reply, kept from reader chats made before they could act. */
+  filesRead?: string[];
+  /** Something the user should know about how this reply was made. */
+  notice?: string;
   at: string;
 }
 
 export interface AssistantSessionMeta {
   id: string;
   title: string;
+  /** Set for a chat opened beside a paper, which then sees that paper and its linked repository. */
+  paperId?: string;
+  /** The paper's title, as it is now. Missing when the paper has gone. */
+  paperTitle?: string;
   harness: AgentBackend;
   model: string;
   thinking: string;
@@ -468,6 +483,7 @@ export interface AssistantSession extends Omit<AssistantSessionMeta, 'pending'> 
   messages: AssistantMessage[];
 }
 
+/** A reader chat from before it ran on the assistant. Only kept for moving old chats over. */
 export interface ChatSessionMeta {
   id: string;
   title: string;
@@ -486,7 +502,7 @@ export interface ChatSession extends ChatSessionMeta {
   messages: ChatMessage[];
 }
 
-export type JobKind = 'blog' | 'script' | 'synth' | 'chat' | 'assistant' | 'tags' | 'repo';
+export type JobKind = 'blog' | 'script' | 'synth' | 'assistant' | 'tags' | 'repo';
 export type JobStatus = 'running' | 'done' | 'failed' | 'canceled';
 
 export interface Job {
@@ -497,8 +513,6 @@ export interface Job {
   targetId?: string;
   label: string;
   status: JobStatus;
-  /** A reader chat that can read a repository, so its stream may hold tool blocks to hide. */
-  tools?: boolean;
   /** Streamed agent output so far. */
   text: string;
   progress?: { done: number; total?: number; note?: string };

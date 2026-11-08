@@ -1,6 +1,7 @@
+import { ASSISTANT_OWNER } from '../../src/shared/assistant';
 import { t } from '../../src/shared/i18n';
 import type { Job, JobKind } from '../../src/shared/types';
-import { ownerHref, type Route } from './routes';
+import { ownerHref, paperHref, type Route } from './routes';
 
 /** Kinds worth telling the user about, with the tab that shows the result. Chat replies and tags have no place here. */
 const ANNOUNCED: Partial<Record<JobKind, { tab?: 'blog' | 'podcast' }>> = {
@@ -44,7 +45,11 @@ function title(job: Job): string {
   }
 }
 
+/** An assistant chat beside a paper records that paper on its job, and lives in the reader. */
+const besidePaper = (job: Job) => job.kind === 'assistant' && job.paperId !== ASSISTANT_OWNER;
+
 function resultHref(job: Job): string {
+  if (besidePaper(job)) return paperHref(job.paperId);
   if (job.kind === 'assistant') return job.targetId ? `#/assistant/${job.targetId}` : '#/assistant';
   // A failed post or script leaves nothing behind to select. A failed synthesis keeps its episode.
   const item = job.status === 'done' || job.kind === 'synth' ? job.targetId : undefined;
@@ -52,6 +57,7 @@ function resultHref(job: Job): string {
 }
 
 function showsResult(route: Route, job: Job): boolean {
+  if (besidePaper(job)) return (route.page === 'paper' && route.id === job.paperId) || (route.page === 'assistant' && route.id === job.targetId);
   if (job.kind === 'assistant') return route.page === 'assistant' && route.id === job.targetId;
   return (route.page === 'paper' || route.page === 'collection') && route.id === job.paperId && route.tab === ANNOUNCED[job.kind]?.tab;
 }

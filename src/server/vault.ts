@@ -26,7 +26,6 @@ import {
   type BlogMeta,
   type ChatMessage,
   type ChatSession,
-  type ChatSessionMeta,
   type Collection,
   type CollectionSummary,
   type OutputEntry,
@@ -505,96 +504,47 @@ export class Vault {
     this.moveToTrash(this.podcastDir(paperId, podcastId), `${paperId}-${podcastId}`);
   }
 
-  // Chat --------------------------------------------------------------------
+  // Chats from before they ran on the assistant -----------------------------
 
-  private chatsDir(paperId: string) {
-    return join(this.paperDir(paperId), 'chats');
-  }
-
-  private chatPath(paperId: string, sessionId: string) {
-    return join(this.chatsDir(paperId), `${assertId(sessionId)}.json`);
-  }
-
-  /** Earlier versions kept one conversation per paper in `chat.json`. It becomes a session. */
-  private migrateLegacyChat(paperId: string, fallbackHarness: AgentBackend): void {
-    const legacy = join(this.paperDir(paperId), 'chat.json');
-    if (!existsSync(legacy)) return;
-    const messages = readJson<ChatMessage[]>(legacy);
-    if (messages.length) {
-      // Messages record which agent answered, as "pi" or "pi · model".
-      const label = messages.find((m) => m.agent)?.agent?.split(' ')[0] as AgentBackend | undefined;
-      const harness = label && AGENT_BACKENDS.includes(label) ? label : fallbackHarness;
-      const session = this.createChat(paperId, messages[0].content, harness);
-      this.writeChat(paperId, {
-        ...session,
-        messages,
-        messageCount: messages.length,
-        createdAt: messages[0].at,
-        updatedAt: messages[messages.length - 1].at,
-      });
-    }
-    rmSync(legacy);
-  }
-
-  private writeChat(paperId: string, session: ChatSession): void {
-    mkdirSync(this.chatsDir(paperId), { recursive: true });
-    writeJson(this.chatPath(paperId, session.id), session);
-  }
-
-  /** Newest activity first. */
-  listChats(paperId: string, fallbackHarness: AgentBackend): ChatSessionMeta[] {
+  /**
+   * Reader chats used to be kept with their paper, first as one `chat.json` and then one file per
+   * session under `chats/`. They are now assistant chats beside that paper, so they move over once.
+   */
+  migrateChats(paperId: string, fallbackHarness: AgentBackend): void {
     this.getPaper(paperId);
-    this.migrateLegacyChat(paperId, fallbackHarness);
-    const dir = this.chatsDir(paperId);
-    if (!existsSync(dir)) return [];
-    return readdirSync(dir)
-      .filter((f) => f.endsWith('.json') && ID_PATTERN.test(f.slice(0, -5)))
-      .map((f) => {
-        const { messages: _messages, ...meta } = readJson<ChatSession>(join(dir, f));
-        return meta;
-      })
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  }
-
-  createChat(paperId: string, firstQuestion: string, harness: AgentBackend, model = '', thinking = ''): ChatSession {
-    const now = new Date().toISOString();
-    const title = firstQuestion.trim().replace(/\s+/g, ' ');
-    const session: ChatSession = {
-      id: newOutputId(),
-      title: title.length > 60 ? `${title.slice(0, 60)}…` : title,
-      harness,
-      model,
-      thinking,
-      messageCount: 0,
-      createdAt: now,
-      updatedAt: now,
-      messages: [],
-    };
-    this.writeChat(paperId, session);
-    return session;
-  }
-
-  getChat(paperId: string, sessionId: string): ChatSession {
-    const file = this.chatPath(paperId, sessionId);
-    if (!existsSync(file)) throw new NotFound(t('会话不存在：{id}', { id: sessionId }));
-    return readJson<ChatSession>(file);
-  }
-
-  appendChat(paperId: string, sessionId: string, message: ChatMessage): void {
-    const session = this.getChat(paperId, sessionId);
-    const messages = [...session.messages, message];
-    this.writeChat(paperId, { ...session, messages, messageCount: messages.length, updatedAt: message.at });
-  }
-
-  updateChat(paperId: string, sessionId: string, patch: Partial<Pick<ChatSession, 'model' | 'thinking'>>): ChatSession {
-    const next = { ...this.getChat(paperId, sessionId), ...patch };
-    this.writeChat(paperId, next);
-    return next;
-  }
-
-  trashChat(paperId: string, sessionId: string): void {
-    this.getChat(paperId, sessionId);
-    this.moveToTrash(this.chatPath(paperId, sessionId), `${paperId}-chat-${sessionId}.json`);
+    const legacy = join(this.paperDir(paperId), 'chat.json');
+    const old: ChatSession[] = [];
+    if (existsSync(legacy)) {
+      const messages = readJson<ChatMessage[]>(legacy);
+      if (messages.length) {
+        // Messages record which agent answered, as "pi" or "pi · model".
+        const label = messages.find((m) => m.agent)?.agent?.split(' ')[0] as AgentBackend | undefined;
+        const title = messages[0].content.trim().replace(/\s+/g, ' ');
+        old.push({
+          id: newOutputId(),
+          title: title.length > 60 ? `${title.slice(0, 60)}…` : title,
+          harness: label && AGENT_BACKENDS.includes(label) ? label : fallbackHarness,
+          model: '',
+          thinking: '',
+          messages,
+          messageCount: messages.length,
+          createdAt: messages[0].at,
+          updatedAt: messages[messages.length - 1].at,
+        });
+      }
+    }
+    const dir = join(this.paperDir(paperId), 'chats');
+    const files = existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith('.json') && ID_PATTERN.test(f.slice(0, -5))) : [];
+    for (const f of files) old.push(readJson<ChatSession>(join(dir, f)));
+    for (const chat of old) {
+      // An id already taken by an assistant chat would otherwise be overwritten.
+      const id = existsSync(this.assistantPath(chat.id)) ? newOutputId() : chat.id;
+      this.saveAssistantSession({ ...chat, id, paperId, allowReads: false });
+    }
+    // Only once everything is safely written.
+    if (existsSync(legacy)) rmSync(legacy);
+    for (const f of files) rmSync(join(dir, f));
+    if (existsSync(dir) && !readdirSync(dir).length) rmSync(dir, { recursive: true });
   }
 
   // Assistant ---------------------------------------------------------------

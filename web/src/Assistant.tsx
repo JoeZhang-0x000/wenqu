@@ -1,10 +1,10 @@
-import { ArrowUp, Ban, Check, ChevronRight, CircleAlert, Loader2, MessageSquare, Plus, RotateCcw, ShieldQuestion, Square, Trash2 } from 'lucide-react';
+import { ArrowUp, Ban, BookOpen, Check, ChevronRight, CircleAlert, Loader2, MessageSquare, Plus, RotateCcw, ShieldQuestion, Square, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { latestSuggestions, visibleReply } from '../../src/shared/assistant';
+import { latestSuggestions, visibleRepoReply } from '../../src/shared/assistant';
 import { t } from '../../src/shared/i18n';
 import type { AgentBackend, ArxivHit, AssistantAction, AssistantSession, AssistantSessionMeta, Job, PaperSummary } from '../../src/shared/types';
 import { EffortSelect, HarnessPicker, ModelSelect, Thinking, effortsOf } from './ChatPanel';
-import { agentsStore, api, bumpLibrary, confirmAction, fail, formatDate, jobsStore, loadAgents, ownerHref, paperHref, settingsStore, toast, useFetch, useStore } from './lib';
+import { agentsStore, api, bumpLibrary, confirmAction, fail, formatDate, goTo, jobsStore, loadAgents, ownerHref, paperHref, settingsStore, toast, useFetch, useStore } from './lib';
 import { Markdown } from './Markdown';
 import { save as saveSettings } from './Settings';
 import { MessageChips, Select } from './ui';
@@ -44,6 +44,12 @@ export function Assistant({ sessionId }: { sessionId?: string }) {
             <div className={`history-row ${s.id === sessionId ? 'on' : ''}`} key={s.id}>
               <a className="history-open" href={href(s.id)}>
                 <span className="history-title">{s.title}</span>
+                {s.paperId && (
+                  <span className="history-meta history-paper">
+                    <BookOpen size={11} />
+                    <span className="ellipsis">{s.paperTitle ?? t('论文已不在书架中')}</span>
+                  </span>
+                )}
                 <span className="history-meta">
                   <MessageSquare size={11} />
                   {s.harness} · {formatDate(s.updatedAt)}
@@ -82,7 +88,10 @@ function Conversation({ sessionId }: { sessionId?: string }) {
   const [input, setInput] = useState('');
   const logRef = useRef<HTMLDivElement>(null);
   const messages = session?.messages ?? [];
-  const streamed = running ? visibleReply(running.text) : '';
+  const streamed = running ? visibleRepoReply(running.text) : '';
+  const paperId = session?.paperId;
+  /** A chat that began beside a paper cites that paper's pages, which open it in the reader. */
+  const onCite = paperId ? (page: number) => goTo(paperHref(paperId, undefined, undefined, page)) : undefined;
   const waiting = messages.flatMap((m) => m.actions ?? []).filter((a) => a.status === 'pending').length;
   const actionCount = messages.flatMap((m) => m.actions ?? []).filter((a) => a.status !== 'running').length;
   /** The reply already answered, until the session catches up with the new message. */
@@ -145,12 +154,25 @@ function Conversation({ sessionId }: { sessionId?: string }) {
               <MessageChips items={starters()} disabled={!draftHarness} onPick={(s) => send(s, true)} />
             </div>
           )}
+          {paperId && (
+            <a className="assistant-paper" href={paperHref(paperId)}>
+              <BookOpen size={13} />
+              <span className="ellipsis">{t('这个会话在论文旁边开始：{title}', { title: session?.paperTitle ?? paperId })}</span>
+            </a>
+          )}
           {messages.map((m, i) =>
             m.role === 'user' ? (
-              <div className="msg user" key={i}>{m.content}</div>
+              <div className="msg user" key={i}>
+                {m.selection && (
+                  <blockquote className="quote" onClick={() => m.page && onCite?.(m.page)}>
+                    {m.page && <span className="mono">p.{m.page}</span>} {m.selection}
+                  </blockquote>
+                )}
+                <div>{m.content}</div>
+              </div>
             ) : (
               <div className={`msg ai ${m.error ? 'err' : ''}`} key={i}>
-                {m.error ? <p>{m.content}</p> : m.content && <Markdown source={m.content} />}
+                {m.error ? <p>{m.content}</p> : m.content && <Markdown source={m.content} onCite={onCite} repo={m.repo} />}
                 {m.actions && sessionId && <Actions sessionId={sessionId} actions={m.actions} locked={Boolean(running)} onSession={setSession} />}
                 {m.agent && <div className="msg-agent mono">{m.agent}</div>}
               </div>
@@ -159,7 +181,7 @@ function Conversation({ sessionId }: { sessionId?: string }) {
           {running && (
             <div className="msg ai">
               {streamed ? (
-                <Markdown source={streamed} />
+                <Markdown source={streamed} onCite={onCite} />
               ) : (
                 <Thinking text={running.progress?.note ?? t('{agent} 正在思考', { agent: harness ?? 'AI' })} />
               )}
@@ -233,7 +255,7 @@ function Conversation({ sessionId }: { sessionId?: string }) {
   );
 }
 
-function Actions({ sessionId, actions, locked, onSession }: { sessionId: string; actions: AssistantAction[]; locked: boolean; onSession(session: AssistantSession): void }) {
+export function Actions({ sessionId, actions, locked, onSession }: { sessionId: string; actions: AssistantAction[]; locked: boolean; onSession(session: AssistantSession): void }) {
   const pending = actions.filter((a) => a.status === 'pending');
   const settled = actions.filter((a) => a.status !== 'pending');
   const retryable = actions.filter((a) => a.retry);
