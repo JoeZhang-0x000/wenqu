@@ -1,17 +1,19 @@
-import { ArrowUp, History, MessageSquare, Plus, Square, Trash2, X } from 'lucide-react';
+import { ArrowUp, History, MessageSquare, Plus, ShieldQuestion, Square, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { latestSuggestions, visibleAnswer, visibleRepoReply } from '../../src/shared/assistant';
+import { latestSuggestions, visibleRepoReply } from '../../src/shared/assistant';
 import { t } from '../../src/shared/i18n';
 import { blobUrl, isRepoPath, readRepoRef, repoLabel, shortSha } from '../../src/shared/repo';
-import type { AgentBackend, AgentStatus, ChatMessage, ChatSession, ChatSessionMeta, Job, RepoState } from '../../src/shared/types';
+import type { AgentBackend, AgentStatus, AssistantMessage, AssistantSession, AssistantSessionMeta, Job, RepoState } from '../../src/shared/types';
+import { Actions } from './Assistant';
 import { agentsStore, api, bumpLibrary, confirmAction, fail, formatDate, jobsStore, loadAgents, settingsStore, useFetch, useStore } from './lib';
 import { Markdown } from './Markdown';
 import type { SelectionAsk } from './PdfViewer';
 import { RepoLink } from './RepoLink';
 import { MessageChips } from './ui';
 
-const starters = () => [t('一句话总结这篇论文'), t('核心贡献是什么？'), t('方法的关键步骤是什么？'), t('有哪些局限和未解决的问题？')];
+const starters = () => [t('一句话总结这篇论文'), t('核心贡献是什么？'), t('给这篇论文打上标签'), t('找几篇和这篇相近的论文')];
 
+/** The assistant, sitting beside one paper: it sees the paper and can do everything the assistant page can. */
 export function ChatPanel({
   paperId,
   ask,
@@ -21,14 +23,14 @@ export function ChatPanel({
   ask: (SelectionAsk & { nonce: number }) | null;
   onCite(page: number): void;
 }) {
-  const { data: sessions } = useFetch<ChatSessionMeta[]>(`/papers/${paperId}/chats`);
+  const { data: sessions } = useFetch<AssistantSessionMeta[]>(`/assistant/sessions?paper=${encodeURIComponent(paperId)}`);
   /** null is a new chat that doesn't exist until its first question. */
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const opened = useRef(false);
-  const { data: session, setData: setSession } = useFetch<ChatSession>(sessionId ? `/papers/${paperId}/chats/${sessionId}` : null);
+  const { data: session, setData: setSession } = useFetch<AssistantSession>(sessionId ? `/assistant/sessions/${sessionId}` : null);
   const jobs = useStore(jobsStore);
-  const runningJobs = useMemo(() => Object.values(jobs).filter((j) => j.kind === 'chat' && j.paperId === paperId && j.status === 'running'), [jobs, paperId]);
+  const runningJobs = useMemo(() => Object.values(jobs).filter((j) => j.kind === 'assistant' && j.paperId === paperId && j.status === 'running'), [jobs, paperId]);
   const running: Job | undefined = runningJobs.find((j) => j.targetId === sessionId);
   const settings = useStore(settingsStore)!;
   const agents = useStore(agentsStore);
@@ -49,11 +51,13 @@ export function ChatPanel({
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const handledAsk = useRef<number>(0);
-  const messages = sessionId && session?.id === sessionId ? session.messages : [];
-  // A chat reading a repository streams tool blocks too, which aren't for showing.
-  const streamed = running ? (running.tools ? visibleRepoReply : visibleAnswer)(running.text) : '';
+  const messages = current?.messages ?? [];
+  // The stream holds action blocks, which aren't for showing.
+  const streamed = running ? visibleRepoReply(running.text) : '';
   const { data: repoState, setData: setRepoState } = useFetch<RepoState>(`/papers/${paperId}/repo`);
   const repoInUse = repoState?.link?.enabled ? repoState.link : undefined;
+  const waiting = messages.flatMap((m) => m.actions ?? []).filter((a) => a.status === 'pending').length;
+  const actionCount = messages.flatMap((m) => m.actions ?? []).filter((a) => a.status !== 'running').length;
   /** The reply already answered, until the session catches up with the new message. */
   const [answered, setAnswered] = useState<string>();
   const suggestions = latestSuggestions(messages, Boolean(running) || answered === messages.at(-1)?.at);
@@ -72,11 +76,11 @@ export function ChatPanel({
   useEffect(() => {
     const log = logRef.current;
     if (log) log.scrollTop = log.scrollHeight;
-  }, [messages.length, streamed, showHistory, suggestions.length]);
+  }, [messages.length, actionCount, streamed, showHistory, suggestions.length]);
 
   /** A chip sends only its own text, so it leaves what's being typed and any quote in place. */
   const send = async (text: string, selection?: { text: string; page?: number } | null, fromChip = false) => {
-    if (!text.trim() || running) return;
+    if (!text.trim() || running || !harness) return;
     if (!fromChip) {
       setInput('');
       setQuote(null);
@@ -86,12 +90,13 @@ export function ChatPanel({
     const body = { message: text, selection: selection?.text, page: selection?.page };
     try {
       if (sessionId) {
-        const res = await api<{ message: ChatMessage }>(`/papers/${paperId}/chats/${sessionId}/messages`, { body });
-        setSession((current) => (current ? { ...current, messages: [...current.messages, res.message] } : current));
+        const res = await api<{ message: AssistantMessage }>(`/assistant/sessions/${sessionId}/messages`, { body });
+        setSession((s) => (s?.id === sessionId ? { ...s, messages: [...s.messages, res.message] } : s));
       } else {
-        const res = await api<{ sessionId: string }>(`/papers/${paperId}/chats`, { body: { ...body, harness: draftHarness, model, thinking } });
+        const res = await api<{ sessionId: string }>('/assistant/sessions', { body: { ...body, paper: paperId, harness: draftHarness, model, thinking } });
         setSessionId(res.sessionId);
       }
+      bumpLibrary();
     } catch (err) {
       if (!fromChip) setInput(text);
       setAnswered(undefined);
@@ -126,7 +131,7 @@ export function ChatPanel({
       return;
     }
     try {
-      setSession(await api<ChatSession>(`/papers/${paperId}/chats/${sessionId}`, { method: 'PATCH', body: { model: nextModel, thinking: nextThinking } }));
+      setSession(await api<AssistantSession>(`/assistant/sessions/${sessionId}`, { method: 'PATCH', body: { model: nextModel, thinking: nextThinking } }));
     } catch (err) {
       fail(err);
     }
@@ -135,7 +140,7 @@ export function ChatPanel({
   const remove = async (id: string) => {
     if (!(await confirmAction(t('把这个会话移到 Vault 回收站？'), t('删除')))) return;
     try {
-      await api(`/papers/${paperId}/chats/${id}`, { method: 'DELETE' });
+      await api(`/assistant/sessions/${id}`, { method: 'DELETE' });
       if (id === sessionId) setSessionId(null);
       bumpLibrary();
     } catch (err) {
@@ -156,7 +161,7 @@ export function ChatPanel({
           paperId={paperId}
           state={repoState}
           busy={runningJobs.length > 0}
-          onLinkChange={(link) => setRepoState((current) => (current ? { ...current, link } : current))}
+          onLinkChange={(link) => setRepoState((s) => (s ? { ...s, link } : s))}
         />
         {sessionId && !showHistory && harness && <span className="agent-pill mono" title={t('会话创建后不能更换 Harness')}>{harness}</span>}
         <button className="icon" title={t('新建会话')} onClick={startNew}><Plus size={15} /></button>
@@ -180,6 +185,7 @@ export function ChatPanel({
                   {s.harness} ·
                   {t('{count} 条消息', { count: s.messageCount })} · {formatDate(s.updatedAt)}
                   {runningJobs.some((j) => j.targetId === s.id) && <span className="dot live" />}
+                  {s.pending > 0 && <span className="assistant-badge">{t('{count} 项待审批', { count: s.pending })}</span>}
                 </span>
               </button>
               <button className="icon danger" title={t('删除这个会话')} onClick={() => remove(s.id)}><Trash2 size={14} /></button>
@@ -192,7 +198,8 @@ export function ChatPanel({
             <div className="chat-empty">
               <p className="serif">{t('读到哪里，问到哪里。')}</p>
               <p className="muted">{t('回答基于全文并标注页码，点击页码可跳转。也可以在左侧选中一段文字直接提问。')}</p>
-              <MessageChips items={repoInUse ? [...starters(), t('代码是怎么实现论文方法的？')] : starters()} onPick={(s) => send(s, null, true)} />
+              <p className="muted">{t('它和助手页一样能打理书架：打标签、修改论文信息、找相近的论文加入书架、生成内容。改动之前会先征得你的同意。')}</p>
+              <MessageChips items={repoInUse ? [...starters(), t('代码是怎么实现论文方法的？')] : starters()} disabled={!draftHarness} onPick={(s) => send(s, null, true)} />
             </div>
           )}
           {messages.map((m, i) =>
@@ -207,9 +214,10 @@ export function ChatPanel({
               </div>
             ) : (
               <div className={`msg ai ${m.error ? 'err' : ''}`} key={i}>
-                {m.error ? <p>{m.content}</p> : <Markdown source={m.content} onCite={onCite} repo={m.repo} />}
+                {m.error ? <p>{m.content}</p> : m.content && <Markdown source={m.content} onCite={onCite} repo={m.repo} />}
                 {m.notice && <p className="msg-notice small">{m.notice}</p>}
                 <FilesRead message={m} />
+                {m.actions && sessionId && <Actions sessionId={sessionId} actions={m.actions} locked={Boolean(running)} onSession={setSession} />}
                 {m.agent && <div className="msg-agent mono">{m.agent}{m.repo && ` · ${repoLabel(m.repo)} @ ${shortSha(m.repo.sha)}`}</div>}
               </div>
             ),
@@ -217,7 +225,7 @@ export function ChatPanel({
           {running && (
             <div className="msg ai">
               {streamed ? (
-                <Markdown source={streamed} onCite={onCite} repo={running.tools ? repoInUse : undefined} />
+                <Markdown source={streamed} onCite={onCite} repo={repoInUse} />
               ) : (
                 <Thinking text={running.progress?.note ?? t('{agent} 正在阅读论文', { agent: harness ?? 'AI' })} />
               )}
@@ -240,6 +248,12 @@ export function ChatPanel({
             }}
           />
         )}
+        {waiting > 0 && !showHistory && (
+          <button className="assistant-waiting" onClick={() => logRef.current?.querySelector('.approval')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}>
+            <ShieldQuestion size={13} />
+            {t('{count} 项操作等待批准，你可以先继续提问', { count: waiting })}
+          </button>
+        )}
         {quote && (
           <div className="quote-chip">
             <span>{quote.page && <b className="mono">p.{quote.page} </b>}{quote.text}</span>
@@ -250,7 +264,7 @@ export function ChatPanel({
           <textarea
             ref={inputRef}
             rows={2}
-            placeholder={quote ? t('针对这段文字提问') : t('问问 {agent}', { agent: harness ?? 'AI' })}
+            placeholder={quote ? t('针对这段文字提问') : t('问问 {agent}，或让它做点什么', { agent: harness ?? 'AI' })}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -293,7 +307,7 @@ export function ChatPanel({
 }
 
 /** Where an answer came from, out of the way until it's wanted. */
-function FilesRead({ message }: { message: ChatMessage }) {
+function FilesRead({ message }: { message: AssistantMessage }) {
   const repo = readRepoRef(message.repo);
   const files = message.filesRead?.filter(isRepoPath) ?? [];
   if (!repo || !files.length) return null;

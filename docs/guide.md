@@ -14,7 +14,9 @@ PDFs are rendered by pdf.js, with search, zoom and a night mode. Math is display
 
 ### Chat
 
-Conversations are kept per paper. Open the history to return to an earlier one or delete it. An existing single conversation from an earlier version becomes a session automatically.
+The chat beside a paper is the assistant, with that paper open in front of it. It answers from the paper's full text and cites pages, and it can do everything the **Assistant** page can: tag this paper or correct its details, find related work on arXiv and add it to your library, or generate a post or episode. It asks before changing anything, with the same cards as the assistant page.
+
+Conversations are kept per paper. Open the history to return to an earlier one or delete it. They also appear on the **Assistant** page, marked with their paper. Chats from earlier versions move over automatically the first time you open their paper.
 
 After an answer, the agent can offer a few follow-up questions as buttons under it. Clicking one sends it as your next message. They come from the same reply, so they cost no extra model call.
 
@@ -34,7 +36,7 @@ The chat can read a GitHub repository linked to the paper, and compare what the 
 
 - **Finding one.** The branch button in the chat bar lists the repositories the paper mentions, from its text and from links hidden behind its text. Papers mention their dependencies and baselines more often than their own code, so the list is ordered by what looks most like this paper's code, and that ordering is only a guess. Check before relying on it. You can also paste any `https://github.com/<owner>/<repo>`.
 - **Linking.** Detecting only reads what's on your machine. Nothing touches the network until you click Link. The latest commit of the default branch is fetched in the background, which you can cancel, and the link records that commit. Fetch again to move to a newer one, or unlink to delete the clone once no other paper uses it.
-- **Asking.** With the switch on, the agent can list directories, read files and search the code at that commit. While it works, the chat shows what it's reading. Answers cite the paper as `[p.N]` and the code with links to those exact lines on GitHub, and they keep pointing at the commit they read. The files read are listed under the answer. With the switch off or no repository linked, the chat works exactly as it did before.
+- **Asking.** With the switch on, the agent can list directories, read files and search the code at that commit, without asking first. Each read is listed in the chat as it happens. Answers cite the paper as `[p.N]` and the code with links to those exact lines on GitHub, and they keep pointing at the commit they read. With the switch off or no repository linked, the code tools aren't offered.
 
 ### Podcasts
 
@@ -75,7 +77,7 @@ Tags that differ only in case count as one, so `llm` takes the spelling already 
 
 ### Assistant
 
-Open **Assistant** in the top bar. Unlike chat, which stays with one paper, the assistant can see your entire library. Try:
+Open **Assistant** in the top bar. It works across your entire library; the chat beside a paper is the same assistant, starting from that paper. Try:
 
 - "Find three recent papers related to the one I added last, and add the best one."
 - "Which papers don't have a podcast yet? Write a short script for each."
@@ -140,14 +142,13 @@ The vault lives in `~/Wenqu` by default. Its contents remain usable without this
     text.json         Extracted text, page by page
     thumb.jpg         Cover image, with cover.json recording how it was chosen
     repo-links.json   GitHub links read from the PDF, a cache
-    chats/<id>.json   One file per conversation
     figures/          Extracted figures
     blogs/<id>.md     Front matter + Markdown, with figures as relative paths
     podcasts/<id>/    podcast.json (script and timeline), audio.mp3
   collections/<collection-id>/
     collection.json   Name and list of papers
     blogs/  podcasts/
-  assistant/<id>.json One file per assistant conversation
+  assistant/<id>.json One file per assistant conversation, including chats beside a paper
   .trash/             Deleted items move here and are not permanently removed
 ```
 
@@ -200,7 +201,7 @@ If you find a security issue, please contact the maintainers privately instead o
 - **Collections:** agent scripts only, with no chat.
 - **Notifications:** they come from the open page, so the tab has to stay open: a closed tab gets none, and neither does a tab the browser has unloaded to save memory. Tasks keep running either way, and the result is there when you come back. They also need a secure address such as `127.0.0.1`, and Android browsers don't show them.
 - **Reading code:**
-  - Reader chat only, GitHub only, and only the default branch's latest commit, so the code may be newer than the paper. Tags, other branches, submodules and Git LFS files aren't available.
+  - Only in the chat beside a paper, GitHub only, and only the default branch's latest commit, so the code may be newer than the paper. Tags, other branches, submodules and Git LFS files aren't available.
   - The agent only reads the code. It runs nothing, so it can't confirm that the code behaves as written or reproduces the paper's results.
   - Detection can miss a repository, for example when a line break in the PDF loses a hyphen in its name, and can rank a dependency first. Repositories over 500 MB aren't fetched.
   - Each question gets up to 8 steps, and each step starts the CLI again, so these answers are slower and use more of your agent quota. Citations can't link to a path containing `[` or `]`.

@@ -56,11 +56,11 @@ describe('assistant routes', () => {
   describe('reader chat suggestions', () => {
     const offer = (...items: string[]) => `<${SUGGESTION_TAG}>${JSON.stringify(items)}</${SUGGESTION_TAG}>`;
     const open = async (message: string) => {
-      const { data } = await call(`/papers/${paperId}/chats`, { message, harness: 'claude' });
+      const { data } = await call('/assistant/sessions', { message, harness: 'claude', paper: paperId });
       await settled(data.sessionId);
       return data.sessionId as string;
     };
-    const stored = async (id: string) => (await call(`/papers/${paperId}/chats/${id}`)).data.messages;
+    const stored = async (id: string) => (await call(`/assistant/sessions/${id}`)).data.messages;
 
     it('stores them apart from the answer, and keeps them out of the next prompt', async () => {
       agent.replies = [`It says so [p.1].\n${offer('What about page 2?')}`];
@@ -68,7 +68,7 @@ describe('assistant routes', () => {
       const [, reply] = await stored(id);
       expect(reply).toMatchObject({ content: 'It says so [p.1].', suggestions: ['What about page 2?'] });
 
-      await call(`/papers/${paperId}/chats/${id}/messages`, { message: 'And then?' });
+      await call(`/assistant/sessions/${id}/messages`, { message: 'And then?' });
       await settled(id);
       expect(agent.prompts[1]).toContain('It says so [p.1].');
       expect(agent.prompts[1]).not.toContain('What about page 2?');

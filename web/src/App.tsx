@@ -151,7 +151,7 @@ function AssistantLink({ active }: { active: boolean }) {
 
 function Activity() {
   const jobs = useStore(jobsStore);
-  const running = useMemo(() => Object.values(jobs).filter((j) => j.status === 'running' && j.kind !== 'chat' && j.kind !== 'assistant'), [jobs]);
+  const running = useMemo(() => Object.values(jobs).filter((j) => j.status === 'running' && j.kind !== 'assistant'), [jobs]);
   const [open, setOpen] = useState(false);
   useEffect(() => {
     if (!running.length) setOpen(false);

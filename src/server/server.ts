@@ -4,9 +4,8 @@ import type { Server } from 'node:http';
 import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express, { type NextFunction, type Request, type Response } from 'express';
-import { parseAnswer } from '../shared/assistant.js';
 import { getLocale, setLocale, t } from '../shared/i18n.js';
-import { parseRepoUrl, repoLabel, shortSha, type PaperRepo, type RepoRef } from '../shared/repo.js';
+import { parseRepoUrl, repoLabel, shortSha, type PaperRepo } from '../shared/repo.js';
 import {
   AGENT_BACKENDS,
   MAX_ROUND_CHARS,
@@ -14,7 +13,6 @@ import {
   isCollectionId,
   type AgentBackend,
   type Blog,
-  type ChatMessage,
   type CollectionMode,
   type CoverPlan,
   type PaperFigure,
@@ -35,10 +33,10 @@ import { DoubaoError, synthesizePodcast } from './doubao.js';
 import { FIGURES_VERSION, byPosition, extractFigures, figurePath, figuresSupported, inlineFigures, keepKnownFigures } from './figures.js';
 import { Jobs, type JobContext } from './jobs.js';
 import { PDFJS_DIR, pageMarkedText } from './pdf.js';
-import { blogPrompt, chatPrompt, collectionSource, paperSource, parseTagReply, scriptPrompt, tagsPrompt, type SourceFigure } from './prompts.js';
+import { blogPrompt, collectionSource, paperSource, parseTagReply, scriptPrompt, tagsPrompt, type SourceFigure } from './prompts.js';
 import { RepoStore, type RepoStoreOptions } from './repo.js';
-import { answerWithRepo } from './repo-chat.js';
 import { REPO_LINKS_VERSION, rankRepoCandidates, readPdfLinks, type PdfLink } from './repo-detect.js';
+import type { AssistantPaper } from './prompts.js';
 import { parseScript } from './script.js';
 import { Assistant } from './assistant.js';
 import { BadRequest, NotFound, Vault, newOutputId } from './vault.js';
@@ -837,20 +835,40 @@ export function createApp({ config, devOrigin, restart, repos: repoOptions }: Ap
     repos.release(repo, vault.listPapers().filter(same).map((p) => p.repo!.sha));
   };
 
-  /** A clone can be missing, as on a new machine. Returns why it couldn't be restored, if it couldn't. */
-  const ensureClone = async (repo: PaperRepo, job: JobContext): Promise<string | undefined> => {
-    if (repos.has(repo)) return undefined;
-    job.progress({ done: 0, note: t('正在重新拉取 {repo}', { repo: repoLabel(repo) }) });
-    try {
-      await repos.restore(repo, { signal: job.signal });
-      return undefined;
-    } catch (err) {
-      job.signal.throwIfAborted();
-      return t('没能重新拉取 {repo} @ {sha}（{error}）。这次回答只依据论文。', { repo: repoLabel(repo), sha: shortSha(repo.sha), error: (err as Error).message });
+  /** A clone can be missing, as on a new machine, so it is fetched again at the recorded commit. */
+  const readerFor = async (paperId: string, signal: AbortSignal) => {
+    const repo = vault.getPaper(paperId).repo;
+    if (!repo?.enabled) throw new Error(t('这篇论文没有在用的代码仓库'));
+    if (!repos.has(repo)) {
+      try {
+        await repos.restore(repo, { signal });
+      } catch (err) {
+        signal.throwIfAborted();
+        throw new Error(t('没能重新拉取 {repo} @ {sha}：{error}', { repo: repoLabel(repo), sha: shortSha(repo.sha), error: (err as Error).message }));
+      }
     }
+    return repos.reader({ owner: repo.owner, name: repo.name, sha: repo.sha });
   };
 
-  const chatRunning = (paperId: string) => jobs.list().some((j) => j.kind === 'chat' && j.paperId === paperId && j.status === 'running');
+  /** What a chat beside a paper sees of it. A paper without text can still be tagged, corrected and so on. */
+  const paperFor = (paperId: string): AssistantPaper => {
+    let meta: PaperSummary;
+    try {
+      meta = vault.getPaper(paperId);
+    } catch (err) {
+      if (err instanceof NotFound) return { id: paperId, missing: true };
+      throw err;
+    }
+    const pages = vault.readPages(paperId);
+    const { text, truncated } = pages.join('').trim()
+      ? pageMarkedText(pages, MAX_PAPER_CHARS)
+      : { text: '(This PDF has no extractable text, as with a scanned document, so only its details above are known.)', truncated: false };
+    const repo = meta.repo?.enabled ? { owner: meta.repo.owner, name: meta.repo.name, sha: meta.repo.sha } : undefined;
+    return { id: paperId, meta, text, truncated, ...(repo ? { repo } : {}) };
+  };
+
+  /** A chat beside the paper may be reading its repository. */
+  const chatRunning = (paperId: string) => jobs.list().some((j) => j.kind === 'assistant' && j.paperId === paperId && j.status === 'running');
 
   /** Detecting only reads what's already on disk. Nothing touches the network until a link is asked for. */
   api.get('/papers/:id/repo', async (req, res) => {
@@ -908,106 +926,6 @@ export function createApp({ config, devOrigin, restart, repos: repoOptions }: Ap
     res.json({ ok: true });
   });
 
-  // Chat --------------------------------------------------------------------
-
-  const askInSession = (
-    paperId: string,
-    sessionId: string,
-    history: ChatMessage[],
-    harness: AgentBackend,
-    model: string,
-    thinking: string,
-    body: { message: string; selection?: string; page?: number },
-  ) => {
-    const ctx = paperContext(paperId);
-    const agent = { backend: harness, model, thinking };
-    const user: ChatMessage = {
-      role: 'user',
-      content: body.message.trim(),
-      selection: body.selection,
-      page: body.page,
-      at: new Date().toISOString(),
-    };
-    vault.appendChat(paperId, sessionId, user);
-    const finish = (content: string, error?: boolean, suggestions?: string[], extra?: Pick<ChatMessage, 'repo' | 'filesRead' | 'notice'>) =>
-      vault.appendChat(paperId, sessionId, {
-        role: 'assistant',
-        content,
-        error,
-        suggestions: suggestions?.length ? suggestions : undefined,
-        agent: agentLabel(agent),
-        ...extra,
-        at: new Date().toISOString(),
-      });
-    const question = { ...ctx, history, question: user.content, selection: body.selection, page: body.page };
-    // With no repository in use, a question is one call and nothing here mentions tools.
-    const repo = ctx.meta.repo?.enabled ? ctx.meta.repo : undefined;
-    const job = jobs.start(
-      { kind: 'chat', paperId, targetId: sessionId, label: t('问答：{title}', { title: user.content.slice(0, 40) }), ...(repo ? { tools: true } : {}) },
-      async (work) => {
-        const { signal, delta } = work;
-        let notice: string | undefined;
-        if (repo) {
-          notice = await ensureClone(repo, work);
-          if (!notice) {
-            const pinned: RepoRef = { owner: repo.owner, name: repo.name, sha: repo.sha };
-            const answer = await answerWithRepo({ ...question, repo: pinned }, { runAgent, agent, reader: repos.reader(pinned), ctx: work });
-            finish(answer.text, undefined, answer.suggestions, { repo: pinned, filesRead: answer.filesRead.length ? answer.filesRead : undefined });
-            return;
-          }
-        }
-        const reply = await runAgent({ ...agent, ...chatPrompt(question), onDelta: delta, signal });
-        // The prompt quotes the paper, so only the reply itself may be read for suggestions.
-        const { text, suggestions } = parseAnswer(reply);
-        if (!text) throw new Error(t('{agent} 没有返回内容。{detail}', { agent: harness, detail: '' }));
-        finish(text, undefined, suggestions, notice ? { notice } : undefined);
-      },
-      (error, canceled) => finish(canceled ? t('已取消') : error, true),
-    );
-    jobs.send({ type: 'library' });
-    return { job, message: user };
-  };
-
-  api.get('/papers/:id/chats', (req, res) => res.json(vault.listChats(req.params.id, config.get().agent.backend)));
-  api.get('/papers/:id/chats/:sessionId', (req, res) => res.json(vault.getChat(req.params.id, req.params.sessionId)));
-
-  /** A session is created by its first question, so an empty one never lingers in the history. */
-  api.post('/papers/:id/chats', json, (req, res) => {
-    if (!req.body?.message?.trim()) throw new BadRequest(t('问题不能为空'));
-    paperContext(req.params.id);
-    const harness = (req.body.harness ?? config.get().agent.backend) as AgentBackend;
-    if (!AGENT_BACKENDS.includes(harness)) throw new BadRequest(t('未知的 Agent 后端：{backend}', { backend: String(harness) }));
-    const model = String(req.body.model ?? '');
-    const thinking = String(req.body.thinking ?? '');
-    const session = vault.createChat(req.params.id, req.body.message, harness, model, thinking);
-    res.json({ sessionId: session.id, ...askInSession(req.params.id, session.id, [], harness, model, thinking, req.body) });
-  });
-
-  api.post('/papers/:id/chats/:sessionId/messages', json, (req, res) => {
-    if (!req.body?.message?.trim()) throw new BadRequest(t('问题不能为空'));
-    const session = vault.getChat(req.params.id, req.params.sessionId);
-    if (jobs.isActive(session.id)) throw new BadRequest(t('这个会话正在回答，请等它结束'));
-    res.json(askInSession(req.params.id, session.id, session.messages, session.harness, session.model, session.thinking, req.body));
-  });
-
-  /** The model and thinking level can change at any time. The harness can't, so it isn't accepted here. */
-  api.patch('/papers/:id/chats/:sessionId', json, (req, res) => {
-    const { model, thinking } = req.body ?? {};
-    res.json(
-      vault.updateChat(req.params.id, req.params.sessionId, {
-        ...(model !== undefined ? { model: String(model) } : {}),
-        ...(thinking !== undefined ? { thinking: String(thinking) } : {}),
-      }),
-    );
-  });
-
-  api.delete('/papers/:id/chats/:sessionId', (req, res) => {
-    if (jobs.isActive(req.params.sessionId)) throw new BadRequest(t('这个会话正在回答，请等它结束'));
-    vault.trashChat(req.params.id, req.params.sessionId);
-    jobs.send({ type: 'library' });
-    res.json({ ok: true });
-  });
-
   // Assistant ---------------------------------------------------------------
 
   const assistant = new Assistant({
@@ -1022,6 +940,8 @@ export function createApp({ config, devOrigin, restart, repos: repoOptions }: Ap
     startBlog,
     startPodcast,
     synthesize: synthesizeScript,
+    paperFor,
+    repoReader: readerFor,
   });
 
   const harnessOf = (value: unknown): AgentBackend => {
@@ -1030,14 +950,22 @@ export function createApp({ config, devOrigin, restart, repos: repoOptions }: Ap
     return harness;
   };
 
-  api.get('/assistant/sessions', (_req, res) => res.json(assistant.list()));
+  /** `?paper=<id>` lists only the chats beside that paper, after moving over any from before they could act. */
+  api.get('/assistant/sessions', (req, res) => {
+    const paperId = typeof req.query.paper === 'string' ? req.query.paper : undefined;
+    if (paperId) vault.migrateChats(paperId, config.get().agent.backend);
+    res.json(assistant.list({ paperId }));
+  });
   api.get('/assistant/sessions/:id', (req, res) => res.json(assistant.get(req.params.id)));
+  /** With `paper`, the chat sits beside that paper, and `selection` and `page` quote it. */
   api.post('/assistant/sessions', json, (req, res) => {
-    const { message, harness, model, thinking } = req.body ?? {};
-    res.json(assistant.create(String(message ?? ''), harnessOf(harness), String(model ?? ''), String(thinking ?? '')));
+    const { message, harness, model, thinking, paper, selection, page } = req.body ?? {};
+    if (paper !== undefined && typeof paper !== 'string') throw new BadRequest(t('请求无效'));
+    res.json(assistant.create(String(message ?? ''), harnessOf(harness), String(model ?? ''), String(thinking ?? ''), { paperId: paper, selection, page }));
   });
   api.post('/assistant/sessions/:id/messages', json, (req, res) => {
-    res.json(assistant.send(req.params.id, String(req.body?.message ?? '')));
+    const { message, selection, page } = req.body ?? {};
+    res.json(assistant.send(req.params.id, String(message ?? ''), { selection, page }));
   });
   const idList = (value: unknown): string[] => {
     if (value !== undefined && !Array.isArray(value)) throw new BadRequest(t('请求无效'));
