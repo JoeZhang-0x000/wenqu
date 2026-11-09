@@ -78,6 +78,9 @@ describe('the dsh patch', () => {
   it('switches tools off and keeps sessions in the working directory', () => {
     const list = rows(dshPatch({}, '/tmp/x'));
     expect(list).toContainEqual({ id: 'tool-bash', disabled: true });
+    expect(list).toContainEqual({ id: 'tool-executor-ptc', disabled: true });
+    // dsh 0.2.2 rejects the old `tools.mode` key at startup.
+    expect(list.some((row) => row.id === 'tools')).toBe(false);
     expect(list).toContainEqual({ id: 'session-persistence-jsonl', config: { root: '/tmp/x/sessions' } });
     expect(list.some((row) => row.id === 'agent-default-model')).toBe(false);
   });

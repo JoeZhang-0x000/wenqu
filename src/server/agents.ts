@@ -38,7 +38,7 @@ export function agentCommand(backend: AgentBackend): string {
 /** dsh has no flags for this, so these rows of its plugin list are switched off by a patch file. */
 const DSH_DISABLED = [
   'tool-plugin-manager', 'tool-working-directory', 'tool-bash', 'tool-pwsh', 'tool-jobs', 'tool-fs', 'tool-fs-search',
-  'tool-skill', 'tool-subagent-control', 'tool-subagent-list-agents', 'tool-subagent', 'tool-subagent-fork',
+  'tool-skill', 'tool-subagent-control', 'tool-subagent', 'tool-subagent-fork',
   'tool-workflow', 'tool-todo', 'tool-goal', 'tool-web', 'plan-mode',
   // Reads AGENTS.md files, and spends a model call on naming the session.
   'agent-instructions', 'session-title-llm',
@@ -49,7 +49,8 @@ const DSH_DEFAULT_MODEL = 'deepseek-flash';
 export function dshPatch(req: Pick<AgentRequest, 'model' | 'thinking'>, cwd: string): string {
   const rows: unknown[] = [
     ...DSH_DISABLED.map((id) => ({ id, disabled: true })),
-    { id: 'tools', config: { mode: 'native' } },
+    // The executor is chosen by which one is mounted; `tools.mode` was removed in dsh 0.2.2.
+    { id: 'tool-executor-ptc', disabled: true },
     { id: 'session-persistence-jsonl', config: { root: join(cwd, 'sessions') } },
   ];
   if (req.model || req.thinking) {
