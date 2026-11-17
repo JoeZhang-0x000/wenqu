@@ -607,21 +607,24 @@ const en = {
 
   // Agent search
   'Agent 搜索': 'Agent search',
-  'Agent 搜索结果': 'Agent search results',
   'Agent 搜索：{query}': 'Agent search: {query}',
   '{agent} 正在搜索': '{agent} is searching',
-  '使用默认的 Agent 后端': 'Uses the default Agent backend',
-  '保存为助手里的会话，接着聊': 'Save as a chat in the assistant and keep talking',
-  转为对话: 'Continue as chat',
   关闭并丢弃: 'Close and discard',
   常规: 'Plain',
   搜索: 'Search',
   搜索书架: 'Search the library',
   搜索方式: 'Search mode',
   清空: 'Clear',
+  'AI 概览': 'AI overview',
+  展开: 'Show more',
+  在助手中继续: 'Continue in Assistant',
+  追问: 'Ask a follow-up',
+  搜索结果: 'Search results',
+  书架里: 'In your library',
+  'arXiv 上': 'On arXiv',
+  '正在找……': 'Looking…',
+  '没有找到相关论文。': 'No related papers found.',
   '描述你想找的论文，Agent 会翻遍书架和 arXiv': 'Describe the papers you\'re looking for',
-  '回车开始。由默认后端 {agent} 在一个临时会话里回答，满意可以转为对话': 'Press Enter to start. The default backend, {agent}, answers in a temporary session you can keep as a chat',
-  '边输入边筛选书架。按 / 随时回到这里': 'Filters the shelf as you type. Press / to come back here',
 } as const;
 
 export type Locale = 'zh' | 'en';

@@ -1,5 +1,5 @@
-import { MessageSquarePlus, Sparkles, X } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { ArrowUp, Bot, ChevronDown, ChevronUp, Square } from 'lucide-react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { latestSuggestions, visibleRepoReply } from '../../src/shared/assistant';
 import { t } from '../../src/shared/i18n';
 import type { AssistantSession, Job } from '../../src/shared/types';
@@ -10,6 +10,8 @@ import { Markdown } from './Markdown';
 import { MessageChips } from './ui';
 
 const SAVED_KEY = 'wenqu-agent-search';
+/** Taller than this, a finished overview is folded until the user asks for the rest. */
+const FOLDED_HEIGHT = 300;
 
 function saved(): string | null {
   try {
@@ -53,12 +55,20 @@ export function closeAgentSearch() {
   if (id) discard(id);
 }
 
-export function AgentSearchResult() {
-  const id = useStore(agentSearchStore);
-  return id ? <Result key={id} sessionId={id} /> : null;
-}
-
-function Result({ sessionId }: { sessionId: string }) {
+/**
+ * The page an agent search turns the library into: an overview that reads like a search result,
+ * the conversation that follows from it, and the papers it found.
+ */
+export function AgentSearchView({
+  sessionId,
+  onQuery,
+  renderResults,
+}: {
+  sessionId: string;
+  /** The question this search was asked with, for the search bar to show. */
+  onQuery(query: string): void;
+  renderResults(session: AssistantSession | undefined, running: boolean): ReactNode;
+}) {
   const { data: session, error, setData: setSession } = useFetch<AssistantSession>(`/assistant/sessions/${sessionId}`);
   const jobs = useStore(jobsStore);
   const running: Job | undefined = useMemo(
@@ -67,22 +77,49 @@ function Result({ sessionId }: { sessionId: string }) {
   );
   const [keeping, setKeeping] = useState(false);
   const [answered, setAnswered] = useState<string>();
+  const [input, setInput] = useState('');
+  const [expanded, setExpanded] = useState(false);
+  const [tall, setTall] = useState(false);
+  const flowRef = useRef<HTMLDivElement>(null);
   const messages = session?.messages ?? [];
   const suggestions = latestSuggestions(messages, Boolean(running) || answered === messages.at(-1)?.at);
   const streamed = running ? visibleRepoReply(running.text) : '';
+  // The first message is the question, which the search bar shows.
+  const flow = messages.slice(1);
+  const followedUp = flow.some((m) => m.role === 'user');
+  const waiting = flow.some((m) => m.actions?.some((a) => a.status === 'pending'));
+  // A conversation, an answer still coming in or a card waiting for the user is never folded away.
+  const folded = tall && !expanded && !running && !followedUp && !waiting;
 
   // A search kept from another tab, or cleared out as stale, has nothing left to show here.
   useEffect(() => {
     if (error || (session && !session.temporary)) show(null);
   }, [error, session?.temporary]);
 
-  const followUp = async (text: string) => {
-    if (running) return;
+  useEffect(() => {
+    if (messages[0]) onQuery(messages[0].content);
+  }, [messages[0]?.content]);
+
+  useLayoutEffect(() => {
+    const el = flowRef.current;
+    if (!el) return;
+    const measure = () => setTall(el.scrollHeight > FOLDED_HEIGHT + 80);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [session]);
+
+  const followUp = async (text: string, fromChip = false) => {
+    if (!text.trim() || running) return;
+    if (!fromChip) setInput('');
     setAnswered(messages.at(-1)?.at);
+    setExpanded(true);
     try {
       await api(`/assistant/sessions/${sessionId}/messages`, { body: { message: text } });
       bumpLibrary();
     } catch (err) {
+      if (!fromChip) setInput(text);
       setAnswered(undefined);
       fail(err);
     }
@@ -101,39 +138,64 @@ function Result({ sessionId }: { sessionId: string }) {
     }
   };
 
-  // The first message is the query, which is still in the search bar.
-  const shown = messages.slice(1);
+  const tools = (
+    <div className="overview-tools">
+      {tall && !followedUp && !waiting && !running && (
+        <button className="overview-more" onClick={() => setExpanded(!expanded)}>
+          {folded ? t('展开') : t('收起')}
+          {folded ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
+        </button>
+      )}
+      <button className="overview-keep" disabled={!session || keeping} data-tip={t('在助手中继续')} aria-label={t('在助手中继续')} onClick={keep}>
+        <Bot size={17} />
+      </button>
+    </div>
+  );
 
   return (
-    <section className="agent-result" aria-label={t('Agent 搜索结果')} aria-busy={Boolean(running)}>
-      <header className="agent-result-head">
-        <Sparkles size={14} className="agent-result-mark" />
-        <span className="agent-result-query ellipsis" title={messages[0]?.content}>{messages[0]?.content ?? t('Agent 搜索')}</span>
-        {session && <span className="agent-pill mono" title={t('使用默认的 Agent 后端')}>{session.harness}</span>}
-        <div className="spacer" />
-        <button className="btn small" disabled={!session || keeping} title={t('保存为助手里的会话，接着聊')} onClick={keep}>
-          <MessageSquarePlus size={13} />{t('转为对话')}
-        </button>
-        <button className="icon" title={t('关闭并丢弃')} aria-label={t('关闭并丢弃')} onClick={closeAgentSearch}><X size={15} /></button>
-      </header>
-      <div className="agent-result-body">
-        {shown.map((m, i) =>
-          m.role === 'user' ? (
-            <div className="msg user" key={i}>{m.content}</div>
-          ) : (
-            <div className={`msg ai ${m.error ? 'err' : ''}`} key={i}>
-              {m.error ? <p>{m.content}</p> : m.content && <Markdown source={m.content} repo={m.repo} />}
-              {m.actions && <Actions sessionId={sessionId} actions={m.actions} locked={Boolean(running)} onSession={setSession} />}
+    <div className="search-view">
+      <section className="overview" aria-label={t('AI 概览')} aria-busy={Boolean(running)}>
+        <h2 className="search-label">{t('AI 概览')}</h2>
+        <div className={`overview-flow ${folded ? 'folded' : ''}`} ref={flowRef} style={folded ? { maxHeight: FOLDED_HEIGHT } : undefined}>
+          {flow.map((m, i) =>
+            m.role === 'user' ? (
+              <div className="msg user" key={i}>{m.content}</div>
+            ) : (
+              <div className={`msg ai ${m.error ? 'err' : ''}`} key={i}>
+                {m.error ? <p>{m.content}</p> : m.content && <Markdown source={m.content} repo={m.repo} />}
+                {m.actions && <Actions sessionId={sessionId} actions={m.actions} locked={Boolean(running)} onSession={setSession} />}
+              </div>
+            ),
+          )}
+          {(running || !session) && (
+            <div className="msg ai">
+              {streamed ? <Markdown source={streamed} /> : <Thinking text={running?.progress?.note ?? t('{agent} 正在搜索', { agent: session?.harness ?? 'AI' })} />}
             </div>
-          ),
-        )}
-        {(running || !session) && (
-          <div className="msg ai">
-            {streamed ? <Markdown source={streamed} /> : <Thinking text={running?.progress?.note ?? t('{agent} 正在搜索', { agent: session?.harness ?? 'AI' })} />}
-          </div>
-        )}
-        <MessageChips className="next-steps" label={t('接下来可以问')} items={suggestions} onPick={(s) => void followUp(s)} />
-      </div>
-    </section>
+          )}
+          {folded && tools}
+        </div>
+        {!folded && tools}
+        <MessageChips className="next-steps" label={t('接下来可以问')} items={suggestions} onPick={(s) => void followUp(s, true)} />
+        <form
+          className="followup"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void followUp(input);
+          }}
+        >
+          <input aria-label={t('追问')} placeholder={t('追问')} value={input} onChange={(e) => setInput(e.target.value)} />
+          {running ? (
+            <button type="button" className="send" title={t('停止')} onClick={() => api(`/jobs/${running.id}/cancel`, { method: 'POST' }).catch(fail)}>
+              <Square size={13} fill="currentColor" />
+            </button>
+          ) : (
+            <button type="submit" className="send" title={t('发送')} disabled={!input.trim() || !session}>
+              <ArrowUp size={16} />
+            </button>
+          )}
+        </form>
+      </section>
+      {renderResults(session, Boolean(running))}
+    </div>
   );
 }

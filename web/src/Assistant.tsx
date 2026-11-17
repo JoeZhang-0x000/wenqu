@@ -438,7 +438,7 @@ function ActionRow({ action, locked, onRetry }: { action: AssistantAction; locke
 }
 
 /** Clicking here is the user acting directly, so unlike the assistant's own requests it needs no approval step. */
-function Hit({ hit }: { hit: ArxivHit }) {
+export function Hit({ hit }: { hit: ArxivHit }) {
   const [added, setAdded] = useState<string>();
   const paperId = added ?? hit.paperId;
   const [busy, setBusy] = useState(false);

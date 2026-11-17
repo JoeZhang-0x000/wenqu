@@ -1,10 +1,11 @@
 import { ArrowRight, AudioLines, Check, FileText, Layers, LayoutGrid, Link2, Loader2, Plus, Rows3, Search, Sparkles, Tag, Upload, X } from 'lucide-react';
 import { getLocale, t } from '../../src/shared/i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { countTags, type PaperSummary } from '../../src/shared/types';
+import { countTags, type AssistantSession, type PaperSummary } from '../../src/shared/types';
 import { openAddPaper } from './AddPaper';
-import { AgentSearchResult, startAgentSearch } from './AgentSearch';
-import { api, fail, paperHref, settingsStore, useFetch, useStore } from './lib';
+import { AgentSearchView, agentSearchStore, closeAgentSearch, startAgentSearch } from './AgentSearch';
+import { Hit } from './Assistant';
+import { api, fail, paperHref, useFetch, useStore } from './lib';
 import { coverUrl, requestCover } from './cover';
 
 const VERSE = '问渠哪得清如许？为有源头活水来。';
@@ -64,10 +65,22 @@ function savedMode(): SearchMode {
   }
 }
 
-function Omnibox({ text, onText, mode, onMode }: { text: string; onText(text: string): void; mode: SearchMode; onMode(mode: SearchMode): void }) {
+function Omnibox({
+  text,
+  onText,
+  mode,
+  onMode,
+  searching,
+}: {
+  text: string;
+  onText(text: string): void;
+  mode: SearchMode;
+  onMode(mode: SearchMode): void;
+  /** An agent search is on the page, which the clear button closes. */
+  searching: boolean;
+}) {
   const input = useRef<HTMLInputElement>(null);
   const [starting, setStarting] = useState(false);
-  const backend = useStore(settingsStore)?.agent.backend;
 
   // "/" jumps to the search bar from anywhere on the page, as on most search sites.
   useEffect(() => {
@@ -135,11 +148,18 @@ function Omnibox({ text, onText, mode, onMode }: { text: string; onText(text: st
             if (e.key === 'Escape') onText('');
           }}
         />
-        {text && (
-          <button type="button" className="icon omnibox-clear" title={t('清空')} aria-label={t('清空')} onClick={() => {
-            onText('');
-            input.current?.focus();
-          }}>
+        {(text || searching) && (
+          <button
+            type="button"
+            className="icon omnibox-clear"
+            title={searching ? t('关闭并丢弃') : t('清空')}
+            aria-label={searching ? t('关闭并丢弃') : t('清空')}
+            onClick={() => {
+              if (searching) closeAgentSearch();
+              onText('');
+              input.current?.focus();
+            }}
+          >
             <X size={15} />
           </button>
         )}
@@ -149,11 +169,6 @@ function Omnibox({ text, onText, mode, onMode }: { text: string; onText(text: st
           </button>
         )}
       </form>
-      <p className="omnibox-hint">
-        {mode === 'agent'
-          ? t('回车开始。由默认后端 {agent} 在一个临时会话里回答，满意可以转为对话', { agent: backend ?? 'AI' })
-          : t('边输入边筛选书架。按 / 随时回到这里')}
-      </p>
     </div>
   );
 }
@@ -170,8 +185,10 @@ export function Library() {
       /* The choice just lasts until the next load. */
     }
   };
-  // Only plain search filters the shelf. An agent search is answered above it instead.
+  // Only plain search filters the shelf. An agent search takes over the page instead.
   const query = mode === 'plain' ? text : '';
+  const searchId = useStore(agentSearchStore);
+  const searching = mode === 'agent' && searchId ? searchId : null;
   const [filter, setFilter] = useState<Filter>('all');
   const [view, setView] = useState<View>(savedView);
   const [chosenTags, setChosenTags] = useState<string[]>([]);
@@ -205,18 +222,27 @@ export function Library() {
   // The ones in use stay in the row, wherever they rank.
   const shownTags = allTagsShown ? tagCounts : tagCounts.filter((c, i) => i < TAGS_SHOWN || activeTags.includes(c.tag));
 
-  const search = (
-    <>
-      <Omnibox text={text} onText={setText} mode={mode} onMode={setMode} />
-      <AgentSearchResult />
-    </>
-  );
+  const omnibox = <Omnibox text={text} onText={setText} mode={mode} onMode={setMode} searching={Boolean(searching)} />;
+
+  if (searching) {
+    return (
+      <div className="page search-page">
+        {omnibox}
+        <AgentSearchView
+          key={searching}
+          sessionId={searching}
+          onQuery={(question) => setText((current) => current || question)}
+          renderResults={(session, running) => <SearchResults session={session} running={running} papers={papers ?? []} />}
+        />
+      </div>
+    );
+  }
 
   if (papers && !papers.length) {
     return (
       <div className="page">
         <Motto />
-        {search}
+        {omnibox}
         <button className="empty-drop" onClick={() => openAddPaper('file')}>
           <Upload size={26} strokeWidth={1.5} />
           <span className="serif">{t('把第一篇论文拖进来')}</span>
@@ -232,7 +258,7 @@ export function Library() {
   return (
     <div className="page">
       <Motto />
-      {search}
+      {omnibox}
       <header className="page-head">
         <h1 className="serif">{t('书架')}</h1>
         <span className="muted mono">{papers?.length ?? ''}</span>
@@ -340,6 +366,52 @@ export function Library() {
         </div>
       )}
     </div>
+  );
+}
+
+const PAPER_LINK = /#\/paper\/([a-z0-9][a-z0-9-]*)/g;
+
+/**
+ * What an agent search found: the library papers its answers link to, in the order they come up,
+ * then what it turned up on arXiv that isn't in the library yet.
+ */
+function SearchResults({ session, running, papers }: { session?: AssistantSession; running: boolean; papers: PaperSummary[] }) {
+  const messages = session?.messages ?? [];
+  const byId = new Map(papers.map((p) => [p.id, p]));
+  const linked = [
+    ...new Set(messages.filter((m) => m.role === 'assistant').flatMap((m) => [...m.content.matchAll(PAPER_LINK)].map((match) => match[1]))),
+  ].flatMap((id) => byId.get(id) ?? []);
+  const hits = [
+    ...new Map(
+      messages
+        .flatMap((m) => m.actions ?? [])
+        .flatMap((a) => a.hits ?? [])
+        .filter((hit) => !hit.paperId || !byId.has(hit.paperId))
+        .map((hit) => [hit.arxivId, hit]),
+    ).values(),
+  ];
+  if (!session) return null;
+  return (
+    <section className="search-results" aria-label={t('搜索结果')}>
+      <h2 className="search-label">{t('搜索结果')}</h2>
+      {linked.length > 0 && (
+        <>
+          <h3 className="search-sub">{t('书架里')}</h3>
+          <div className="shelf feed">
+            {linked.map((p) => <PaperCard key={p.id} paper={p} view="feed" activeTags={[]} onTag={() => {}} onToggle={() => {}} />)}
+          </div>
+        </>
+      )}
+      {hits.length > 0 && (
+        <>
+          <h3 className="search-sub">{t('arXiv 上')}</h3>
+          <ul className="search-hits">
+            {hits.map((hit) => <Hit key={hit.arxivId} hit={hit} />)}
+          </ul>
+        </>
+      )}
+      {!linked.length && !hits.length && <p className="muted">{running ? t('正在找……') : t('没有找到相关论文。')}</p>}
+    </section>
   );
 }
 
