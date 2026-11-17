@@ -1,4 +1,4 @@
-import { Loader2, Moon, Settings as SettingsIcon, Sun, X } from 'lucide-react';
+import { AudioLines, Bot, Layers, LibraryBig, Loader2, Moon, PanelLeftClose, PanelLeftOpen, Settings as SettingsIcon, Sun, X } from 'lucide-react';
 import { t } from '../../src/shared/i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AssistantSessionMeta, FontSize, UpdateStatus } from '../../src/shared/types';
@@ -26,6 +26,22 @@ export function App() {
   const [dragging, setDragging] = useState<false | 'pdf' | 'images'>(false);
   const [loadError, setLoadError] = useState<string>();
   const dragDepth = useRef(0);
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('wenqu-sidebar') === 'collapsed';
+    } catch {
+      return false;
+    }
+  });
+  const toggleCollapsed = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    try {
+      localStorage.setItem('wenqu-sidebar', next ? 'collapsed' : 'open');
+    } catch {
+      /* A convenience only. */
+    }
+  };
 
   useEffect(() => {
     refreshSettings().catch((err: Error) => setLoadError(err.message));
@@ -82,52 +98,72 @@ export function App() {
 
   return (
     <div className="app">
-      <header className="top">
-        <a className="brand" href="#/">
-          <span className="brand-mark"><i /><i /><i /><i /></span>
-          <span className="serif">{t('问渠')}</span>
-        </a>
-        <nav className="top-nav">
-          <a className={route.page === 'library' ? 'on' : ''} href="#/">{t('书架')}</a>
-          <a className={route.page === 'collections' || route.page === 'collection' ? 'on' : ''} href="#/collections">{t('合集')}</a>
-          <a className={route.page === 'works' ? 'on' : ''} href="#/works">{t('作品')}</a>
-          <AssistantLink active={route.page === 'assistant'} />
-        </nav>
-        <div className="spacer" />
-        <Activity />
-        <ThemeToggle />
-        <button className="icon" title={t('设置')} onClick={() => setSettingsOpen({})}>
-          <SettingsIcon size={17} />
-          {!settings.doubao.hasKey && <span className="dot corner" />}
-        </button>
-      </header>
-      <UpdateBanner />
-      <NotificationOffer />
-      <main className="main">
-        {route.page === 'library' && <Library />}
-        {route.page === 'works' && <Works />}
-        {route.page === 'collections' && <Collections />}
-        {route.page === 'assistant' && <Assistant sessionId={route.id} />}
-        {route.page === 'paper' && route.id && (
-          <Reader
-            key={route.id}
-            paperId={route.id}
-            tab={route.tab}
-            item={route.item}
-            at={route.at}
-            onOpenSettings={(section) => setSettingsOpen({ section })}
-          />
-        )}
-        {route.page === 'collection' && route.id && (
-          <CollectionView
-            key={route.id}
-            id={route.id}
-            tab={route.tab}
-            item={route.item}
-            onOpenSettings={(section) => setSettingsOpen({ section })}
-          />
-        )}
-      </main>
+      <div className="shell">
+        <aside className={`app-rail${collapsed ? ' collapsed' : ''}`}>
+          <div className="app-rail-head">
+            <a className="brand" href="#/" title={t('问渠')}>
+              <span className="brand-mark"><i /><i /><i /><i /></span>
+              <span className="serif side-label">{t('问渠')}</span>
+            </a>
+            <button className="icon app-rail-toggle" title={collapsed ? t('展开侧边栏') : t('收起侧边栏')} onClick={toggleCollapsed}>
+              {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+            </button>
+          </div>
+          <nav className="side-nav">
+            <a className={route.page === 'library' ? 'on' : ''} href="#/" title={t('书架')}>
+              <span className="side-icon"><LibraryBig size={17} /></span><span className="side-label">{t('书架')}</span>
+            </a>
+            <a className={route.page === 'collections' || route.page === 'collection' ? 'on' : ''} href="#/collections" title={t('合集')}>
+              <span className="side-icon"><Layers size={17} /></span><span className="side-label">{t('合集')}</span>
+            </a>
+            <a className={route.page === 'works' ? 'on' : ''} href="#/works" title={t('作品')}>
+              <span className="side-icon"><AudioLines size={17} /></span><span className="side-label">{t('作品')}</span>
+            </a>
+            <AssistantLink active={route.page === 'assistant'} />
+          </nav>
+          <div className="spacer" />
+          <div className="side-foot">
+            <Activity />
+            <ThemeToggle />
+            <button className="side-btn" title={t('设置')} onClick={() => setSettingsOpen({})}>
+              <span className="side-icon">
+                <SettingsIcon size={17} />
+                {!settings.doubao.hasKey && <span className="dot corner" />}
+              </span>
+              <span className="side-label">{t('设置')}</span>
+            </button>
+          </div>
+        </aside>
+        <div className="workspace">
+          <UpdateBanner />
+          <NotificationOffer />
+          <main className="main">
+            {route.page === 'library' && <Library />}
+            {route.page === 'works' && <Works />}
+            {route.page === 'collections' && <Collections />}
+            {route.page === 'assistant' && <Assistant sessionId={route.id} />}
+            {route.page === 'paper' && route.id && (
+              <Reader
+                key={route.id}
+                paperId={route.id}
+                tab={route.tab}
+                item={route.item}
+                at={route.at}
+                onOpenSettings={(section) => setSettingsOpen({ section })}
+              />
+            )}
+            {route.page === 'collection' && route.id && (
+              <CollectionView
+                key={route.id}
+                id={route.id}
+                tab={route.tab}
+                item={route.item}
+                onOpenSettings={(section) => setSettingsOpen({ section })}
+              />
+            )}
+          </main>
+        </div>
+      </div>
       <Player />
       {settingsOpen && <SettingsDialog initial={settingsOpen.section} onClose={() => setSettingsOpen(false)} />}
       <AddPaperDialog />
@@ -149,9 +185,12 @@ function AssistantLink({ active }: { active: boolean }) {
   const jobs = useStore(jobsStore);
   const working = Object.values(jobs).some((j) => j.kind === 'assistant' && j.status === 'running');
   return (
-    <a className={active ? 'on' : ''} href={waiting ? `#/assistant/${waiting.id}` : '#/assistant'} title={waiting ? t('有操作等待你批准') : undefined}>
-      {t('助手')}
-      {waiting ? <span className="dot nav-dot" aria-label={t('有操作等待你批准')} /> : working && <span className="dot live nav-dot" aria-label={t('助手正在工作')} />}
+    <a className={active ? 'on' : ''} href={waiting ? `#/assistant/${waiting.id}` : '#/assistant'} title={waiting ? t('有操作等待你批准') : t('助手')}>
+      <span className="side-icon">
+        <Bot size={17} />
+        {waiting ? <span className="dot corner" aria-label={t('有操作等待你批准')} /> : working && <span className="dot live corner" aria-label={t('助手正在工作')} />}
+      </span>
+      <span className="side-label">{t('助手')}</span>
     </a>
   );
 }
@@ -166,9 +205,10 @@ function Activity() {
   if (!running.length) return null;
   return (
     <div className="activity">
-      <button className="activity-btn" onClick={() => setOpen(!open)}>
-        <Loader2 size={14} className="spin" />
-        {t('{count} 个任务', { count: running.length })}
+      <button className="activity-btn" title={t('{count} 个任务', { count: running.length })} onClick={() => setOpen(!open)}>
+        <span className="side-icon"><Loader2 size={15} className="spin" /></span>
+        <span className="side-label">{t('{count} 个任务', { count: running.length })}</span>
+        <span className="activity-count">{running.length}</span>
       </button>
       {open && (
         <div className="activity-list">
@@ -270,7 +310,7 @@ function ThemeToggle() {
   });
   return (
     <button
-      className="icon"
+      className="side-btn"
       title={dark ? t('切换到浅色') : t('切换到深色')}
       onClick={() => {
         const next = dark ? 'light' : 'dark';
@@ -283,7 +323,8 @@ function ThemeToggle() {
         setDark(!dark);
       }}
     >
-      {dark ? <Sun size={17} /> : <Moon size={17} />}
+      <span className="side-icon">{dark ? <Sun size={17} /> : <Moon size={17} />}</span>
+      <span className="side-label">{dark ? t('浅色') : t('深色')}</span>
     </button>
   );
 }

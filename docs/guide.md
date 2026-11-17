@@ -77,7 +77,7 @@ Tags that differ only in case count as one, so `llm` takes the spelling already 
 
 ### Assistant
 
-Open **Assistant** in the top bar. It works across your entire library; the chat beside a paper is the same assistant, starting from that paper. Try:
+Open **Assistant** in the sidebar. It works across your entire library; the chat beside a paper is the same assistant, starting from that paper. Try:
 
 - "Find three recent papers related to the one I added last, and add the best one."
 - "Which papers don't have a podcast yet? Write a short script for each."
