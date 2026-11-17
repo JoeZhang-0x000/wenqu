@@ -89,6 +89,7 @@ export function newOutputId(): string {
  *   <vault>/collections/<collection-id>/
  *     collection.json  blogs/  podcasts/
  *   <vault>/assistant/<id>.json         (one file per assistant conversation)
+ *   <vault>/assistant-images/<id>/      (images attached to that conversation)
  *
  * Blogs and podcasts belong to an "owner", which is either a paper or a collection.
  */
@@ -579,6 +580,29 @@ export class Vault {
   trashAssistantSession(id: string): void {
     this.getAssistantSession(id);
     this.moveToTrash(this.assistantPath(id), `assistant-${id}.json`);
+    const images = this.assistantImagesDir(id);
+    if (existsSync(images)) this.moveToTrash(images, `assistant-${id}-images`);
+  }
+
+  /** Beside the chats rather than among them, so listing chats never meets a folder. */
+  private assistantImagesDir(id: string) {
+    return join(this.root, 'assistant-images', assertId(id));
+  }
+
+  /** Returns the file name the message keeps. */
+  saveAssistantImage(sessionId: string, data: Buffer, ext: string): string {
+    const dir = this.assistantImagesDir(sessionId);
+    mkdirSync(dir, { recursive: true });
+    const name = `${randomBytes(6).toString('hex')}.${ext}`;
+    writeFileSync(join(dir, name), data);
+    return name;
+  }
+
+  assistantImagePath(sessionId: string, name: string): string {
+    if (!/^[a-f0-9]{12}\.(png|jpg|gif|webp)$/.test(name)) throw new NotFound(t('文件不存在'));
+    const file = join(this.assistantImagesDir(sessionId), name);
+    if (!existsSync(file)) throw new NotFound(t('文件不存在'));
+    return file;
   }
 
   // Across the vault --------------------------------------------------------

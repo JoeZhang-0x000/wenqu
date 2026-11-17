@@ -592,6 +592,27 @@ const en = {
   '\n  问渠已启动\n\n  地址   {url}\n  Vault  {vault}\n\n  按 Ctrl+C 退出\n':
     '\n  Wenqu is running\n\n  URL    {url}\n  Vault  {vault}\n\n  Press Ctrl+C to quit\n',
   '错误：{error}': 'Error: {error}',
+
+  // Images in the assistant
+  '{agent} 不能读取图片': '{agent} can\'t read images',
+  '一条消息最多附带 {count} 张图片': 'A message can carry at most {count} images',
+  '只支持 PNG、JPEG、GIF 和 WebP 图片': 'Only PNG, JPEG, GIF and WebP images are supported',
+  '图片太大了，最大 {size} MB': 'The image is too large. The limit is {size} MB',
+  无法读取这张图片: 'Could not read this image',
+  图片: 'Image',
+  '图片 {n}': 'Image {n}',
+  添加图片: 'Add images',
+  移除图片: 'Remove image',
+  '松手，把图片附加到消息': 'Drop to attach the images to your message',
+
+  // Agent search
+  'Agent 搜索': 'Agent search',
+  常规: 'Plain',
+  搜索: 'Search',
+  搜索书架: 'Search the library',
+  搜索方式: 'Search mode',
+  清空: 'Clear',
+  '问问助手，比如帮我找某个方向的论文': 'Ask the assistant, such as to find papers on a topic',
 } as const;
 
 export type Locale = 'zh' | 'en';

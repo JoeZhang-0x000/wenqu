@@ -3,7 +3,11 @@ import { ASSISTANT_OWNER, parseReply, withRepairedTags, withoutImaginedResults }
 import { t } from '../shared/i18n.js';
 import {
   BLOG_STYLES,
+  IMAGE_BACKENDS,
+  IMAGE_TYPES,
   LANGUAGES,
+  MAX_IMAGE_BYTES,
+  MAX_MESSAGE_IMAGES,
   MAX_PAPER_TAGS,
   MAX_TAG_CHARS,
   PODCAST_LENGTHS,
@@ -41,6 +45,8 @@ const MAX_READ_CHARS = 30_000;
 const MAX_SEARCH_RESULTS = 25;
 /** A passage selected in the PDF, quoted along with a question. */
 const MAX_SELECTION_CHARS = 4000;
+/** Earlier images beyond these are mentioned to the agent, but not shown again. */
+const MAX_CONTEXT_IMAGES = 8;
 /** Generating is slow and each one runs an agent, so a batch runs a few at a time. */
 const GENERATION_CONCURRENCY = 3;
 
@@ -253,13 +259,14 @@ export class Assistant {
   }
 
   /** A chat given a paper sits beside it: it sees that paper, and messages can quote it. */
-  create(message: string, harness: AgentBackend, model: string, thinking: string, scope: { paperId?: string } & Quote = {}) {
-    const text = requireMessage(message);
+  create(message: string, harness: AgentBackend, model: string, thinking: string, scope: { paperId?: string } & Quote = {}, images?: unknown) {
+    const attached = readImages(images, harness);
+    const text = requireMessage(message, attached.length > 0);
     if (scope.paperId) this.vault.getPaper(scope.paperId);
     const now = new Date().toISOString();
     const session: AssistantSession = {
       id: newOutputId(),
-      title: clip(text.replace(/\s+/g, ' '), 60),
+      title: clip(text.replace(/\s+/g, ' '), 60) || t('图片'),
       ...(scope.paperId ? { paperId: scope.paperId } : {}),
       harness,
       model,
@@ -271,18 +278,31 @@ export class Assistant {
       messages: [],
     };
     this.vault.saveAssistantSession(session);
-    const user: AssistantMessage = { role: 'user', content: text, ...quoteOf(session, scope), at: now };
+    const user: AssistantMessage = { role: 'user', content: text, ...quoteOf(session, scope), ...this.saveImages(session.id, attached), at: now };
     this.addMessage(session.id, user);
-    return { sessionId: session.id, job: this.startTurn(session.id, text), message: user };
+    return { sessionId: session.id, job: this.startTurn(session.id, session.title), message: user };
   }
 
-  send(id: string, message: string, quote: Quote = {}) {
-    const text = requireMessage(message);
+  send(id: string, message: string, quote: Quote = {}, images?: unknown) {
+    const session = this.vault.getAssistantSession(id);
+    const attached = readImages(images, session.harness);
+    const text = requireMessage(message, attached.length > 0);
     this.assertIdle(id);
-    const user: AssistantMessage = { role: 'user', content: text, ...quoteOf(this.vault.getAssistantSession(id), quote), at: new Date().toISOString() };
+    const user: AssistantMessage = { role: 'user', content: text, ...quoteOf(session, quote), ...this.saveImages(id, attached), at: new Date().toISOString() };
     this.addMessage(id, user);
-    return { job: this.startTurn(id, text), message: user };
+    return { job: this.startTurn(id, text || t('图片')), message: user };
   }
+
+  private saveImages(sessionId: string, images: DecodedImage[]): Pick<AssistantMessage, 'images'> {
+    if (!images.length) return {};
+    return { images: images.map((image) => this.vault.saveAssistantImage(sessionId, image.data, image.ext)) };
+  }
+
+  imagePath(id: string, name: string): string {
+    return this.vault.assistantImagePath(id, name);
+  }
+
+
 
   /**
    * Decides only the actions named, so other cards keep waiting and nothing is approved by omission.
@@ -422,6 +442,7 @@ export class Assistant {
       // Read again each step, since the paper or its repository can change while the agent works.
       const paper = session.paperId ? this.deps.paperFor(session.paperId) : undefined;
       const repo = paper && !('missing' in paper) ? paper.repo : undefined;
+      const images = this.contextImages(session);
       const raw = await this.deps.runAgent({
         backend: session.harness,
         model: session.model || undefined,
@@ -431,7 +452,9 @@ export class Assistant {
           messages: session.messages,
           today: new Date().toISOString().slice(0, 10),
           paper,
+          imageNumbers: new Map(images.map((image, i) => [image.name, i + 1])),
         }),
+        images: images.map(({ path, mediaType }) => ({ path, mediaType })),
         onDelta: ctx.delta,
         signal: ctx.signal,
       });
@@ -464,6 +487,21 @@ export class Assistant {
       content: t('这一轮的步骤已达上限，已经先停下。可以回复“继续”接着做。'),
       error: true,
       at: new Date().toISOString(),
+    });
+  }
+
+  /** The latest images in the chat, oldest first, which is how the agent numbers them. Missing files are skipped. */
+  private contextImages(session: AssistantSession): { name: string; path: string; mediaType: string }[] {
+    const names = session.messages.flatMap((m) => m.images ?? []).slice(-MAX_CONTEXT_IMAGES);
+    return names.flatMap((name) => {
+      try {
+        const path = this.vault.assistantImagePath(session.id, name);
+        const ext = name.split('.').pop();
+        const mediaType = Object.entries(IMAGE_TYPES).find(([, e]) => e === ext)?.[0];
+        return mediaType ? [{ name, path, mediaType }] : [];
+      } catch {
+        return [];
+      }
     });
   }
 
@@ -1181,10 +1219,34 @@ function quoteOf(session: AssistantSession, { selection, page }: Quote): Pick<As
   return { selection: clip(selection.trim(), MAX_SELECTION_CHARS), ...(ok ? { page } : {}) };
 }
 
-function requireMessage(message: string): string {
+/** A message with images may have no words. */
+function requireMessage(message: string, hasImages = false): string {
   const text = message.trim();
-  if (!text) throw new BadRequest(t('问题不能为空'));
+  if (!text && !hasImages) throw new BadRequest(t('问题不能为空'));
   return text;
+}
+
+interface DecodedImage {
+  data: Buffer;
+  ext: string;
+}
+
+/** Images arrive as data URLs. All are checked before anything is stored, so a bad one changes nothing. */
+function readImages(value: unknown, harness: AgentBackend): DecodedImage[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) throw new BadRequest(t('请求无效'));
+  if (!value.length) return [];
+  if (value.length > MAX_MESSAGE_IMAGES) throw new BadRequest(t('一条消息最多附带 {count} 张图片', { count: MAX_MESSAGE_IMAGES }));
+  if (!IMAGE_BACKENDS.includes(harness)) throw new BadRequest(t('{agent} 不能读取图片', { agent: harness }));
+  return (value as string[]).map((url) => {
+    const match = /^data:(image\/[a-z]+);base64,([A-Za-z0-9+/=]+)$/.exec(url);
+    const ext = match && Object.hasOwn(IMAGE_TYPES, match[1]) ? IMAGE_TYPES[match[1]] : undefined;
+    if (!match || !ext) throw new BadRequest(t('只支持 PNG、JPEG、GIF 和 WebP 图片'));
+    const data = Buffer.from(match[2], 'base64');
+    if (!data.length) throw new BadRequest(t('只支持 PNG、JPEG、GIF 和 WebP 图片'));
+    if (data.length > MAX_IMAGE_BYTES) throw new BadRequest(t('图片太大了，最大 {size} MB', { size: MAX_IMAGE_BYTES / 1024 / 1024 }));
+    return { data, ext };
+  });
 }
 
 function pendingActions(session: AssistantSession): AssistantAction[] {

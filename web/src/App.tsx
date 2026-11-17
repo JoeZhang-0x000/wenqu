@@ -3,6 +3,7 @@ import { t } from '../../src/shared/i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AssistantSessionMeta, FontSize, UpdateStatus } from '../../src/shared/types';
 import { Assistant } from './Assistant';
+import { acceptsImageDrop, takeImageDrop } from './Attachments';
 import { api, confirmStore, connectEvents, fail, jobsStore, localeStore, refreshSettings, routeStore, settingsStore, toastStore, useFetch, useStore } from './lib';
 import { CollectionView, Collections } from './Collections';
 import { AddPaperDialog, importFiles } from './AddPaper';
@@ -21,7 +22,8 @@ export function App() {
   // Subscribing here re-renders the whole tree when the language changes.
   useStore(localeStore);
   const [settingsOpen, setSettingsOpen] = useState<false | { section?: 'api' }>(false);
-  const [dragging, setDragging] = useState(false);
+  /** 'images' when what's being dragged can go with a message instead. */
+  const [dragging, setDragging] = useState<false | 'pdf' | 'images'>(false);
   const [loadError, setLoadError] = useState<string>();
   const dragDepth = useRef(0);
 
@@ -33,10 +35,14 @@ export function App() {
   // Dropping a PDF anywhere imports it, and keeps the browser from navigating to the file.
   useEffect(() => {
     const hasFiles = (e: DragEvent) => e.dataTransfer?.types.includes('Files');
+    const onlyImages = (e: DragEvent) => {
+      const items = [...(e.dataTransfer?.items ?? [])];
+      return items.length > 0 && items.every((item) => item.type.startsWith('image/'));
+    };
     const enter = (e: DragEvent) => {
       if (!hasFiles(e)) return;
       dragDepth.current++;
-      setDragging(true);
+      setDragging(onlyImages(e) && acceptsImageDrop() ? 'images' : 'pdf');
     };
     const leave = (e: DragEvent) => {
       if (!hasFiles(e)) return;
@@ -51,7 +57,8 @@ export function App() {
       e.preventDefault();
       dragDepth.current = 0;
       setDragging(false);
-      void importFiles([...(e.dataTransfer?.files ?? [])]);
+      const files = [...(e.dataTransfer?.files ?? [])];
+      if (!takeImageDrop(files)) void importFiles(files);
     };
     window.addEventListener('dragenter', enter);
     window.addEventListener('dragleave', leave);
@@ -126,7 +133,7 @@ export function App() {
       <AddPaperDialog />
       {dragging && (
         <div className="drop-veil">
-          <span className="serif">{t('松手，把论文放进书架')}</span>
+          <span className="serif">{dragging === 'images' ? t('松手，把图片附加到消息') : t('松手，把论文放进书架')}</span>
         </div>
       )}
       <Toasts />

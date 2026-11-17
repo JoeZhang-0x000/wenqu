@@ -1155,6 +1155,45 @@ describe('Assistant', () => {
     expect(requests[1]).toMatchObject({ backend: 'claude', model: 'opus', thinking: 'high' });
     expect(lastMessage(id).agent).toBe('claude · opus · high');
   });
+
+  describe('images', () => {
+    // A 1×1 PNG.
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==';
+
+    it('stores them with the message and shows them to the agent by number', async () => {
+      say('A chart.', 'Same chart.');
+      const { sessionId } = assistant.create('', 'claude', '', '', {}, [png]);
+      await idle(sessionId);
+      const [user] = assistant.get(sessionId).messages;
+      expect(user.images).toHaveLength(1);
+      expect(assistant.get(sessionId).title).toBe('Image');
+      expect(readFileSync(assistant.imagePath(sessionId, user.images![0]))).toEqual(Buffer.from(png.split(',')[1], 'base64'));
+      expect(requests[0].images).toEqual([{ path: assistant.imagePath(sessionId, user.images![0]), mediaType: 'image/png' }]);
+      expect(requests[0].prompt).toContain('[The user attached image 1, which you can see.]');
+
+      assistant.send(sessionId, 'and this?', {}, [png, png]);
+      await idle(sessionId);
+      expect(requests[1].images).toHaveLength(3);
+      expect(requests[1].prompt).toContain('image 2, image 3');
+    });
+
+    it('refuses what it cannot store or show, before changing anything', () => {
+      expect(() => assistant.create('hi', 'dsh', '', '', {}, [png])).toThrow(/dsh/);
+      expect(() => assistant.create('hi', 'claude', '', '', {}, ['data:image/svg+xml;base64,PHN2Zz4='])).toThrow();
+      expect(() => assistant.create('hi', 'claude', '', '', {}, Array(5).fill(png))).toThrow();
+      expect(() => assistant.create('', 'claude', '', '', {}, [])).toThrow();
+      expect(assistant.list()).toEqual([]);
+    });
+
+    it('trashes them with the chat', async () => {
+      say('Ok.');
+      const { sessionId } = assistant.create('look', 'claude', '', '', {}, [png]);
+      await idle(sessionId);
+      const name = assistant.get(sessionId).messages[0].images![0];
+      assistant.remove(sessionId);
+      expect(() => assistant.imagePath(sessionId, name)).toThrow();
+    });
+  });
 });
 
 describe('assistantTranscript', () => {
