@@ -2,6 +2,14 @@ import type { PaperRepo, RepoRef } from './repo.js';
 
 export type AgentBackend = 'pi' | 'claude' | 'codex' | 'dsh';
 export const AGENT_BACKENDS: AgentBackend[] = ['claude', 'codex', 'pi', 'dsh'];
+/** The CLIs that can pass an image on to their model. dsh has no way to attach one. */
+export const IMAGE_BACKENDS: AgentBackend[] = ['claude', 'codex', 'pi'];
+
+/** Images a user can attach to one assistant message. */
+export const MAX_MESSAGE_IMAGES = 4;
+/** After decoding. The page shrinks big photos before sending, so this only stops the unreasonable. */
+export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+export const IMAGE_TYPES: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' };
 
 export type FontSize = 'small' | 'medium' | 'large' | 'xlarge';
 export const FONT_SIZES: FontSize[] = ['small', 'medium', 'large', 'xlarge'];
@@ -457,6 +465,8 @@ export interface AssistantMessage {
   filesRead?: string[];
   /** Something the user should know about how this reply was made. */
   notice?: string;
+  /** Images the user attached, as file names served under the session. */
+  images?: string[];
   at: string;
 }
 
@@ -470,6 +480,13 @@ export interface AssistantSessionMeta {
   harness: AgentBackend;
   model: string;
   thinking: string;
+  /**
+   * An agent search from the search bar. It isn't listed with the chats, and is thrown away
+   * unless the user keeps it, which turns it into an ordinary chat.
+   */
+  temporary?: boolean;
+  /** Where the first message came from. A search is answered as one, even once it's kept. */
+  origin?: 'search';
   messageCount: number;
   /** Actions waiting for the user. */
   pending: number;

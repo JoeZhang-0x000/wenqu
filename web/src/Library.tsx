@@ -1,9 +1,10 @@
-import { AudioLines, Check, FileText, Layers, LayoutGrid, Link2, Plus, Rows3, Search, Tag, Upload } from 'lucide-react';
+import { ArrowRight, AudioLines, Check, FileText, Layers, LayoutGrid, Link2, Loader2, Plus, Rows3, Search, Sparkles, Tag, Upload, X } from 'lucide-react';
 import { getLocale, t } from '../../src/shared/i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { countTags, type PaperSummary } from '../../src/shared/types';
 import { openAddPaper } from './AddPaper';
-import { api, fail, paperHref, useFetch } from './lib';
+import { AgentSearchResult, startAgentSearch } from './AgentSearch';
+import { api, fail, paperHref, settingsStore, useFetch, useStore } from './lib';
 import { coverUrl, requestCover } from './cover';
 
 const VERSE = '问渠哪得清如许？为有源头活水来。';
@@ -51,9 +52,126 @@ function saveView(view: View) {
   }
 }
 
+/** Agent search asks the default harness, which looks through the library and arXiv. Plain search filters the shelf as you type. */
+type SearchMode = 'agent' | 'plain';
+const MODE_KEY = 'wenqu-search-mode';
+
+function savedMode(): SearchMode {
+  try {
+    return localStorage.getItem(MODE_KEY) === 'plain' ? 'plain' : 'agent';
+  } catch {
+    return 'agent';
+  }
+}
+
+function Omnibox({ text, onText, mode, onMode }: { text: string; onText(text: string): void; mode: SearchMode; onMode(mode: SearchMode): void }) {
+  const input = useRef<HTMLInputElement>(null);
+  const [starting, setStarting] = useState(false);
+  const backend = useStore(settingsStore)?.agent.backend;
+
+  // "/" jumps to the search bar from anywhere on the page, as on most search sites.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey || target.closest('input, textarea, select, [contenteditable]')) return;
+      e.preventDefault();
+      input.current?.focus();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const submit = async () => {
+    if (mode !== 'agent' || !text.trim() || starting) return;
+    setStarting(true);
+    try {
+      await startAgentSearch(text.trim());
+    } catch (err) {
+      fail(err);
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  const modes = [
+    { id: 'agent' as const, label: 'Agent', icon: <Sparkles size={13} /> },
+    { id: 'plain' as const, label: t('常规'), icon: <Search size={13} /> },
+  ];
+  return (
+    <div className="omnibox-wrap">
+      <form
+        className={`omnibox ${mode === 'agent' ? 'is-agent' : ''}`}
+        role="search"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void submit();
+        }}
+      >
+        <div className="omnibox-modes" role="radiogroup" aria-label={t('搜索方式')}>
+          {modes.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              role="radio"
+              aria-checked={mode === m.id}
+              className={mode === m.id ? 'on' : ''}
+              onClick={() => {
+                onMode(m.id);
+                input.current?.focus();
+              }}
+            >
+              {m.icon}
+              <span className="omnibox-mode-label">{m.label}</span>
+            </button>
+          ))}
+        </div>
+        <input
+          ref={input}
+          aria-label={mode === 'agent' ? t('Agent 搜索') : t('搜索书架')}
+          placeholder={mode === 'agent' ? t('描述你想找的论文，Agent 会翻遍书架和 arXiv') : t('搜索标题、作者、摘要')}
+          value={text}
+          onChange={(e) => onText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') onText('');
+          }}
+        />
+        {text && (
+          <button type="button" className="icon omnibox-clear" title={t('清空')} aria-label={t('清空')} onClick={() => {
+            onText('');
+            input.current?.focus();
+          }}>
+            <X size={15} />
+          </button>
+        )}
+        {mode === 'agent' && (
+          <button type="submit" className="omnibox-go" title={t('搜索')} aria-label={t('搜索')} disabled={!text.trim() || starting}>
+            {starting ? <Loader2 size={16} className="spin" /> : <ArrowRight size={17} />}
+          </button>
+        )}
+      </form>
+      <p className="omnibox-hint">
+        {mode === 'agent'
+          ? t('回车开始。由默认后端 {agent} 在一个临时会话里回答，满意可以转为对话', { agent: backend ?? 'AI' })
+          : t('边输入边筛选书架。按 / 随时回到这里')}
+      </p>
+    </div>
+  );
+}
+
 export function Library() {
   const { data: papers } = useFetch<PaperSummary[]>('/papers');
-  const [query, setQuery] = useState('');
+  const [text, setText] = useState('');
+  const [mode, setModeState] = useState<SearchMode>(savedMode);
+  const setMode = (next: SearchMode) => {
+    setModeState(next);
+    try {
+      localStorage.setItem(MODE_KEY, next);
+    } catch {
+      /* The choice just lasts until the next load. */
+    }
+  };
+  // Only plain search filters the shelf. An agent search is answered above it instead.
+  const query = mode === 'plain' ? text : '';
   const [filter, setFilter] = useState<Filter>('all');
   const [view, setView] = useState<View>(savedView);
   const [chosenTags, setChosenTags] = useState<string[]>([]);
@@ -87,10 +205,18 @@ export function Library() {
   // The ones in use stay in the row, wherever they rank.
   const shownTags = allTagsShown ? tagCounts : tagCounts.filter((c, i) => i < TAGS_SHOWN || activeTags.includes(c.tag));
 
+  const search = (
+    <>
+      <Omnibox text={text} onText={setText} mode={mode} onMode={setMode} />
+      <AgentSearchResult />
+    </>
+  );
+
   if (papers && !papers.length) {
     return (
       <div className="page">
         <Motto />
+        {search}
         <button className="empty-drop" onClick={() => openAddPaper('file')}>
           <Upload size={26} strokeWidth={1.5} />
           <span className="serif">{t('把第一篇论文拖进来')}</span>
@@ -106,14 +232,11 @@ export function Library() {
   return (
     <div className="page">
       <Motto />
+      {search}
       <header className="page-head">
         <h1 className="serif">{t('书架')}</h1>
         <span className="muted mono">{papers?.length ?? ''}</span>
         <div className="spacer" />
-        <div className="search">
-          <Search size={14} />
-          <input placeholder={t('搜索标题、作者、摘要')} value={query} onChange={(e) => setQuery(e.target.value)} />
-        </div>
         <div className="shelf-view" role="group" aria-label={t('书架视图')}>
           {[
             { id: 'cards' as const, label: t('卡片流'), icon: <LayoutGrid size={15} /> },

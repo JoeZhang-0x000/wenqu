@@ -8,6 +8,7 @@ import { getLocale, setLocale, t } from '../shared/i18n.js';
 import { parseRepoUrl, repoLabel, shortSha, type PaperRepo } from '../shared/repo.js';
 import {
   AGENT_BACKENDS,
+  IMAGE_TYPES,
   MAX_ROUND_CHARS,
   MAX_SCRIPT_CHARS,
   isCollectionId,
@@ -101,6 +102,8 @@ export function createApp({ config, devOrigin, restart, repos: repoOptions }: Ap
   });
 
   const json = express.json({ limit: '5mb' });
+  /** A message can carry a few images, as data URLs. */
+  const withImages = express.json({ limit: '30mb' });
   const api = express.Router();
 
   api.get('/state', async (_req, res) => {
@@ -957,15 +960,38 @@ export function createApp({ config, devOrigin, restart, repos: repoOptions }: Ap
     res.json(assistant.list({ paperId }));
   });
   api.get('/assistant/sessions/:id', (req, res) => res.json(assistant.get(req.params.id)));
-  /** With `paper`, the chat sits beside that paper, and `selection` and `page` quote it. */
-  api.post('/assistant/sessions', json, (req, res) => {
-    const { message, harness, model, thinking, paper, selection, page } = req.body ?? {};
+  /**
+   * With `paper`, the chat sits beside that paper, and `selection` and `page` quote it.
+   * `temporary` makes it an agent search, which by default runs on the default harness with its model and thinking level.
+   */
+  api.post('/assistant/sessions', withImages, (req, res) => {
+    const { message, harness, model, thinking, paper, selection, page, images, temporary } = req.body ?? {};
     if (paper !== undefined && typeof paper !== 'string') throw new BadRequest(t('请求无效'));
-    res.json(assistant.create(String(message ?? ''), harnessOf(harness), String(model ?? ''), String(thinking ?? ''), { paperId: paper, selection, page }));
+    const chosen = harnessOf(harness);
+    const agent = config.get().agent;
+    res.json(
+      assistant.create(
+        String(message ?? ''),
+        chosen,
+        String(model ?? (temporary === true ? agent.models[chosen] : '')),
+        String(thinking ?? (temporary === true ? agent.thinking[chosen] : '')),
+        { paperId: paper, selection, page, temporary: temporary === true },
+        images,
+      ),
+    );
   });
-  api.post('/assistant/sessions/:id/messages', json, (req, res) => {
-    const { message, selection, page } = req.body ?? {};
-    res.json(assistant.send(req.params.id, String(message ?? ''), { selection, page }));
+  api.post('/assistant/sessions/:id/messages', withImages, (req, res) => {
+    const { message, selection, page, images } = req.body ?? {};
+    res.json(assistant.send(req.params.id, String(message ?? ''), { selection, page }, images));
+  });
+  api.get('/assistant/sessions/:id/images/:name', (req, res) => {
+    const name = req.params.name;
+    const type = Object.entries(IMAGE_TYPES).find(([, ext]) => name.endsWith(`.${ext}`))?.[0] ?? 'application/octet-stream';
+    sendFile(res, assistant.imagePath(req.params.id, name), type);
+  });
+  /** Keeps an agent search as an ordinary chat. */
+  api.post('/assistant/sessions/:id/keep', (req, res) => {
+    res.json(assistant.keep(req.params.id));
   });
   const idList = (value: unknown): string[] => {
     if (value !== undefined && !Array.isArray(value)) throw new BadRequest(t('请求无效'));
@@ -990,8 +1016,8 @@ export function createApp({ config, devOrigin, restart, repos: repoOptions }: Ap
       }),
     );
   });
-  api.delete('/assistant/sessions/:id', (req, res) => {
-    assistant.remove(req.params.id);
+  api.delete('/assistant/sessions/:id', async (req, res) => {
+    await assistant.remove(req.params.id);
     res.json({ ok: true });
   });
 

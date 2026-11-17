@@ -1,9 +1,9 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, join } from 'node:path';
+import { delimiter, extname, join } from 'node:path';
 import { t } from '../shared/i18n.js';
-import type { AgentBackend } from '../shared/types.js';
+import { IMAGE_BACKENDS, type AgentBackend } from '../shared/types.js';
 
 export interface AgentRequest {
   backend: AgentBackend;
@@ -12,8 +12,27 @@ export interface AgentRequest {
   thinking?: string;
   system: string;
   prompt: string;
+  /** Images to show the model along with the prompt, which refers to them by number in this order. */
+  images?: AgentImage[];
   onDelta?: (text: string) => void;
   signal?: AbortSignal;
+}
+
+export interface AgentImage {
+  path: string;
+  mediaType: string;
+}
+
+/** Copied into the working directory under plain names, so no path from the vault reaches a command line. */
+const imageName = (image: AgentImage, i: number) => `image-${i + 1}${extname(image.path).toLowerCase()}`;
+
+/** Claude Code takes images only as content blocks in a stream-json message. */
+function claudeMessage(req: AgentRequest): string {
+  const images = (req.images ?? []).flatMap((image, i) => [
+    { type: 'text', text: `Image ${i + 1}:` },
+    { type: 'image', source: { type: 'base64', media_type: image.mediaType, data: readFileSync(image.path).toString('base64') } },
+  ]);
+  return `${JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: req.prompt }, ...images] } })}\n`;
 }
 
 interface Adapter {
@@ -79,8 +98,9 @@ const ADAPTERS: Record<AgentBackend, Adapter> = {
       '--system-prompt', r.system,
       ...(r.model ? ['--model', r.model] : []),
       ...(r.thinking ? ['--effort', r.thinking] : []),
+      ...(r.images?.length ? ['--input-format', 'stream-json'] : []),
     ],
-    stdin: (r) => r.prompt,
+    stdin: (r) => (r.images?.length ? claudeMessage(r) : r.prompt),
     parse(e, state) {
       if (e.type === 'stream_event' && e.event?.delta?.type === 'text_delta') return e.event.delta.text;
       if (e.type === 'result') {
@@ -104,6 +124,8 @@ const ADAPTERS: Record<AgentBackend, Adapter> = {
       '--system-prompt', r.system,
       ...(r.model ? ['--model', r.model] : []),
       ...(r.thinking ? ['--thinking', r.thinking] : []),
+      // pi attaches files named with @, relative to the working directory, to the prompt from stdin.
+      ...(r.images ?? []).map((image, i) => `@${imageName(image, i)}`),
     ],
     stdin: (r) => r.prompt,
     parse(e) {
@@ -123,6 +145,9 @@ const ADAPTERS: Record<AgentBackend, Adapter> = {
       '--ephemeral',
       ...(r.model ? ['-m', r.model] : []),
       ...(r.thinking ? ['-c', `model_reasoning_effort="${r.thinking}"`] : []),
+      ...(r.images ?? []).flatMap((image, i) => ['--image', imageName(image, i)]),
+      // `--image` takes several values, so this marks where they end.
+      '--',
       '-',
     ],
     // `codex exec` has no system prompt flag.
@@ -157,10 +182,12 @@ export function runAgent(req: AgentRequest): Promise<string> {
   if (req.model && !SAFE_MODEL.test(req.model)) return Promise.reject(new Error(t('模型名称无效：{model}', { model: req.model })));
 
   if (req.thinking && !/^[a-z]+$/.test(req.thinking)) return Promise.reject(new Error(t('思考强度无效：{level}', { level: req.thinking })));
+  if (req.images?.length && !IMAGE_BACKENDS.includes(req.backend)) return Promise.reject(new Error(t('{agent} 不能读取图片', { agent: req.backend })));
 
   return new Promise((resolve, reject) => {
     const cwd = mkdtempSync(join(tmpdir(), 'wenqu-agent-'));
     adapter.setup?.(req, cwd);
+    req.images?.forEach((image, i) => copyFileSync(image.path, join(cwd, imageName(image, i))));
     const child = spawn(agentCommand(req.backend), adapter.args(req), { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
     let text = '';
     let stderr = '';

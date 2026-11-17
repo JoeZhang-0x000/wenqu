@@ -30,6 +30,8 @@ function nextBlock(text: string, from: number, tags: string[]) {
 
 /** The owner recorded on the assistant's background jobs, which belong to no paper. */
 export const ASSISTANT_OWNER = 'assistant';
+/** The owner on the jobs of an agent search that hasn't been kept, whose answer shows in the library. */
+export const SEARCH_OWNER = 'agent-search';
 
 /** Everything that hides blocks goes through here, so a stream and the stored reply always agree. */
 function withoutBlocks(raw: string, tags: string[]): string {

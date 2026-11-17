@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { latestSuggestions, visibleRepoReply } from '../../src/shared/assistant';
 import { t } from '../../src/shared/i18n';
 import type { AgentBackend, ArxivHit, AssistantAction, AssistantSession, AssistantSessionMeta, Job, PaperSummary } from '../../src/shared/types';
+import { AttachButton, AttachmentStrip, MessageImages, useAttachments } from './Attachments';
 import { EffortSelect, HarnessPicker, ModelSelect, Thinking, effortsOf } from './ChatPanel';
 import { agentsStore, api, bumpLibrary, confirmAction, fail, formatDate, goTo, jobsStore, loadAgents, ownerHref, paperHref, settingsStore, toast, useFetch, useStore } from './lib';
 import { Markdown } from './Markdown';
@@ -86,6 +87,7 @@ function Conversation({ sessionId }: { sessionId?: string }) {
   const thinking = sessionId ? (session?.thinking ?? '') : (draftThinking ?? (draftHarness ? settings.agent.thinking[draftHarness] : '') ?? '');
   const agent = agents?.find((a) => a.backend === harness);
   const [input, setInput] = useState('');
+  const attachments = useAttachments(harness);
   const logRef = useRef<HTMLDivElement>(null);
   const messages = session?.messages ?? [];
   const streamed = running ? visibleRepoReply(running.text) : '';
@@ -107,21 +109,28 @@ function Conversation({ sessionId }: { sessionId?: string }) {
     if (log) log.scrollTop = log.scrollHeight;
   }, [messages.length, actionCount, streamed, suggestions.length]);
 
-  /** A chip sends only its own text, so it leaves what's being typed in place. */
+  /** A chip sends only its own text, so it leaves what's being typed, and any images, in place. */
   const send = async (text: string, fromChip = false) => {
-    if (!text.trim() || running || !harness) return;
-    if (!fromChip) setInput('');
+    const images = fromChip ? [] : attachments.images;
+    if ((!text.trim() && !images.length) || running || !harness || attachments.busy) return;
+    if (!fromChip) {
+      setInput('');
+      attachments.clear();
+    }
     setAnswered(messages.at(-1)?.at);
     try {
       if (sessionId) {
-        await api(`/assistant/sessions/${sessionId}/messages`, { body: { message: text } });
+        await api(`/assistant/sessions/${sessionId}/messages`, { body: { message: text, images } });
         bumpLibrary();
       } else {
-        const res = await api<{ sessionId: string }>('/assistant/sessions', { body: { message: text, harness: draftHarness, model, thinking } });
+        const res = await api<{ sessionId: string }>('/assistant/sessions', { body: { message: text, images, harness: draftHarness, model, thinking } });
         location.hash = href(res.sessionId);
       }
     } catch (err) {
-      if (!fromChip) setInput(text);
+      if (!fromChip) {
+        setInput(text);
+        attachments.restore(images);
+      }
       setAnswered(undefined);
       fail(err);
     }
@@ -168,7 +177,8 @@ function Conversation({ sessionId }: { sessionId?: string }) {
                     {m.page && <span className="mono">p.{m.page}</span>} {m.selection}
                   </blockquote>
                 )}
-                <div>{m.content}</div>
+                {sessionId && <MessageImages sessionId={sessionId} images={m.images} />}
+                {m.content && <div>{m.content}</div>}
               </div>
             ) : (
               <div className={`msg ai ${m.error ? 'err' : ''}`} key={i}>
@@ -212,6 +222,7 @@ function Conversation({ sessionId }: { sessionId?: string }) {
             </button>
           )}
           <div className="chat-box">
+            <AttachmentStrip attachments={attachments} />
             <textarea
               rows={2}
               autoFocus
@@ -219,6 +230,7 @@ function Conversation({ sessionId }: { sessionId?: string }) {
               placeholder={t('问问助手，或让它做点什么')}
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              onPaste={attachments.onPaste}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault();
@@ -229,6 +241,7 @@ function Conversation({ sessionId }: { sessionId?: string }) {
             <div className="chat-actions">
               {harness && (
                 <>
+                  <AttachButton attachments={attachments} harness={harness} />
                   <ModelSelect
                     agent={agent}
                     value={model}
@@ -243,7 +256,7 @@ function Conversation({ sessionId }: { sessionId?: string }) {
                   <Square size={13} fill="currentColor" />
                 </button>
               ) : (
-                <button className="send" title={t('发送')} disabled={!input.trim() || !harness} onClick={() => send(input)}>
+                <button className="send" title={t('发送')} disabled={(!input.trim() && !attachments.images.length) || !harness || attachments.busy} onClick={() => send(input)}>
                   <ArrowUp size={16} />
                 </button>
               )}

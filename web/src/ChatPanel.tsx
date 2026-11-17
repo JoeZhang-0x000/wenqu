@@ -5,6 +5,7 @@ import { t } from '../../src/shared/i18n';
 import { blobUrl, isRepoPath, readRepoRef, repoLabel, shortSha } from '../../src/shared/repo';
 import type { AgentBackend, AgentStatus, AssistantMessage, AssistantSession, AssistantSessionMeta, Job, RepoState } from '../../src/shared/types';
 import { Actions } from './Assistant';
+import { AttachButton, AttachmentStrip, MessageImages, useAttachments } from './Attachments';
 import { agentsStore, api, bumpLibrary, confirmAction, fail, formatDate, jobsStore, loadAgents, settingsStore, useFetch, useStore } from './lib';
 import { Markdown } from './Markdown';
 import type { SelectionAsk } from './PdfViewer';
@@ -47,6 +48,7 @@ export function ChatPanel({
   const thinking = sessionId ? (current?.thinking ?? '') : (draftThinking ?? (draftHarness ? settings.agent.thinking[draftHarness] : '') ?? '');
   const agent = agents?.find((a) => a.backend === harness);
   const [input, setInput] = useState('');
+  const attachments = useAttachments(harness);
   const [quote, setQuote] = useState<{ text: string; page?: number } | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -78,16 +80,18 @@ export function ChatPanel({
     if (log) log.scrollTop = log.scrollHeight;
   }, [messages.length, actionCount, streamed, showHistory, suggestions.length]);
 
-  /** A chip sends only its own text, so it leaves what's being typed and any quote in place. */
+  /** A chip sends only its own text, so it leaves what's being typed, any quote and any images in place. */
   const send = async (text: string, selection?: { text: string; page?: number } | null, fromChip = false) => {
-    if (!text.trim() || running || !harness) return;
+    const images = fromChip ? [] : attachments.images;
+    if ((!text.trim() && !images.length) || running || !harness || attachments.busy) return;
     if (!fromChip) {
       setInput('');
       setQuote(null);
+      attachments.clear();
     }
     setAnswered(messages.at(-1)?.at);
     setShowHistory(false);
-    const body = { message: text, selection: selection?.text, page: selection?.page };
+    const body = { message: text, selection: selection?.text, page: selection?.page, images };
     try {
       if (sessionId) {
         const res = await api<{ message: AssistantMessage }>(`/assistant/sessions/${sessionId}/messages`, { body });
@@ -98,7 +102,10 @@ export function ChatPanel({
       }
       bumpLibrary();
     } catch (err) {
-      if (!fromChip) setInput(text);
+      if (!fromChip) {
+        setInput(text);
+        attachments.restore(images);
+      }
       setAnswered(undefined);
       fail(err);
     }
@@ -210,7 +217,8 @@ export function ChatPanel({
                     {m.page && <span className="mono">p.{m.page}</span>} {m.selection}
                   </blockquote>
                 )}
-                <div>{m.content}</div>
+                {sessionId && <MessageImages sessionId={sessionId} images={m.images} />}
+                {m.content && <div>{m.content}</div>}
               </div>
             ) : (
               <div className={`msg ai ${m.error ? 'err' : ''}`} key={i}>
@@ -261,12 +269,14 @@ export function ChatPanel({
           </div>
         )}
         <div className="chat-box">
+          <AttachmentStrip attachments={attachments} />
           <textarea
             ref={inputRef}
             rows={2}
             placeholder={quote ? t('针对这段文字提问') : t('问问 {agent}，或让它做点什么', { agent: harness ?? 'AI' })}
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onPaste={attachments.onPaste}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
@@ -277,6 +287,7 @@ export function ChatPanel({
           <div className="chat-actions">
             {harness && (
               <>
+                <AttachButton attachments={attachments} harness={harness} />
                 <ModelSelect
                   agent={agent}
                   value={model}
@@ -295,7 +306,7 @@ export function ChatPanel({
                 <Square size={13} fill="currentColor" />
               </button>
             ) : (
-              <button className="send" title={t('发送')} disabled={!input.trim() || !harness} onClick={() => send(input, quote)}>
+              <button className="send" title={t('发送')} disabled={(!input.trim() && !attachments.images.length) || !harness || attachments.busy} onClick={() => send(input, quote)}>
                 <ArrowUp size={16} />
               </button>
             )}

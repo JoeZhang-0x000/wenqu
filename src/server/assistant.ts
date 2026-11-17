@@ -1,9 +1,13 @@
 import { randomBytes } from 'node:crypto';
-import { ASSISTANT_OWNER, parseReply, withRepairedTags, withoutImaginedResults } from '../shared/assistant.js';
+import { ASSISTANT_OWNER, SEARCH_OWNER, parseReply, withRepairedTags, withoutImaginedResults } from '../shared/assistant.js';
 import { t } from '../shared/i18n.js';
 import {
   BLOG_STYLES,
+  IMAGE_BACKENDS,
+  IMAGE_TYPES,
   LANGUAGES,
+  MAX_IMAGE_BYTES,
+  MAX_MESSAGE_IMAGES,
   MAX_PAPER_TAGS,
   MAX_TAG_CHARS,
   PODCAST_LENGTHS,
@@ -41,6 +45,10 @@ const MAX_READ_CHARS = 30_000;
 const MAX_SEARCH_RESULTS = 25;
 /** A passage selected in the PDF, quoted along with a question. */
 const MAX_SELECTION_CHARS = 4000;
+/** Earlier images beyond these are mentioned to the agent, but not shown again. */
+const MAX_CONTEXT_IMAGES = 8;
+/** An agent search left alone this long is thrown away. */
+const TEMPORARY_TTL_MS = 24 * 60 * 60_000;
 /** Generating is slow and each one runs an agent, so a batch runs a few at a time. */
 const GENERATION_CONCURRENCY = 3;
 
@@ -60,6 +68,12 @@ export interface AssistantDeps {
   paperFor(paperId: string): AssistantPaper;
   /** The paper's linked repository at its pinned commit, fetched again if the clone has gone. Throws if it can't be read. */
   repoReader(paperId: string, signal: AbortSignal): Promise<RepoReader>;
+}
+
+/** Where a chat starts: beside a paper, or as an agent search from the search bar. */
+export interface Scope {
+  paperId?: string;
+  temporary?: boolean;
 }
 
 /** Where a user's message in a chat beside a paper points into it. */
@@ -197,7 +211,8 @@ export class Assistant {
     const titles = new Map(this.vault.listPapers().map((p) => [p.id, p.title]));
     return this.vault
       .listAssistantSessions()
-      .filter((s) => !filter.paperId || s.paperId === filter.paperId)
+      .filter((s) => !s.temporary || !this.dropIfStale(s))
+      .filter((s) => !s.temporary && (!filter.paperId || s.paperId === filter.paperId))
       .map((stored) => {
         const session = this.settleInterrupted(stored);
         const { messages, allowReads: _allowReads, ...meta } = session;
@@ -252,15 +267,21 @@ export class Assistant {
     return next;
   }
 
-  /** A chat given a paper sits beside it: it sees that paper, and messages can quote it. */
-  create(message: string, harness: AgentBackend, model: string, thinking: string, scope: { paperId?: string } & Quote = {}) {
-    const text = requireMessage(message);
+  /**
+   * A chat given a paper sits beside it: it sees that paper, and messages can quote it.
+   * A temporary one is an agent search, kept out of the list until the user keeps it.
+   */
+  create(message: string, harness: AgentBackend, model: string, thinking: string, scope: Scope & Quote = {}, images?: unknown) {
+    const attached = readImages(images, harness);
+    const text = requireMessage(message, attached.length > 0);
     if (scope.paperId) this.vault.getPaper(scope.paperId);
+    if (scope.paperId && scope.temporary) throw new BadRequest(t('请求无效'));
     const now = new Date().toISOString();
     const session: AssistantSession = {
       id: newOutputId(),
-      title: clip(text.replace(/\s+/g, ' '), 60),
+      title: clip(text.replace(/\s+/g, ' '), 60) || t('图片'),
       ...(scope.paperId ? { paperId: scope.paperId } : {}),
+      ...(scope.temporary ? { temporary: true, origin: 'search' as const } : {}),
       harness,
       model,
       thinking,
@@ -271,17 +292,51 @@ export class Assistant {
       messages: [],
     };
     this.vault.saveAssistantSession(session);
-    const user: AssistantMessage = { role: 'user', content: text, ...quoteOf(session, scope), at: now };
+    const user: AssistantMessage = { role: 'user', content: text, ...quoteOf(session, scope), ...this.saveImages(session.id, attached), at: now };
     this.addMessage(session.id, user);
-    return { sessionId: session.id, job: this.startTurn(session.id, text), message: user };
+    return { sessionId: session.id, job: this.startTurn(session.id, session.title), message: user };
   }
 
-  send(id: string, message: string, quote: Quote = {}) {
-    const text = requireMessage(message);
+  send(id: string, message: string, quote: Quote = {}, images?: unknown) {
+    const session = this.vault.getAssistantSession(id);
+    const attached = readImages(images, session.harness);
+    const text = requireMessage(message, attached.length > 0);
     this.assertIdle(id);
-    const user: AssistantMessage = { role: 'user', content: text, ...quoteOf(this.vault.getAssistantSession(id), quote), at: new Date().toISOString() };
+    const user: AssistantMessage = { role: 'user', content: text, ...quoteOf(session, quote), ...this.saveImages(id, attached), at: new Date().toISOString() };
     this.addMessage(id, user);
-    return { job: this.startTurn(id, text), message: user };
+    return { job: this.startTurn(id, text || t('图片')), message: user };
+  }
+
+  private saveImages(sessionId: string, images: DecodedImage[]): Pick<AssistantMessage, 'images'> {
+    if (!images.length) return {};
+    return { images: images.map((image) => this.vault.saveAssistantImage(sessionId, image.data, image.ext)) };
+  }
+
+  imagePath(id: string, name: string): string {
+    return this.vault.assistantImagePath(id, name);
+  }
+
+  /** An agent search becomes an ordinary chat, listed with the others. */
+  keep(id: string): AssistantSession {
+    this.mutate(id, (session) => {
+      delete session.temporary;
+    });
+    this.deps.jobs.send({ type: 'library' });
+    return this.get(id);
+  }
+
+  /** Stopped first, so nothing writes to it once it's gone. */
+  private async discardSearch(id: string): Promise<void> {
+    this.deps.jobs.cancelTarget(id);
+    await this.deps.jobs.settled(id);
+    this.vault.dropTemporaryAssistantSession(id);
+  }
+
+  /** A search nobody kept and nothing is running in. Returns whether it was dropped. */
+  private dropIfStale(session: AssistantSession): boolean {
+    if (Date.now() - Date.parse(session.updatedAt) < TEMPORARY_TTL_MS || this.deps.jobs.isActive(session.id)) return false;
+    this.vault.dropTemporaryAssistantSession(session.id);
+    return true;
   }
 
   /**
@@ -352,7 +407,9 @@ export class Assistant {
     return this.get(id);
   }
 
-  remove(id: string): void {
+  /** A chat goes to the trash. A search that was never kept is thrown away, even while it's answering. */
+  remove(id: string): Promise<void> | void {
+    if (this.vault.getAssistantSession(id).temporary) return this.discardSearch(id);
     this.assertIdle(id);
     this.vault.trashAssistantSession(id);
     this.deps.jobs.send({ type: 'library' });
@@ -391,9 +448,14 @@ export class Assistant {
   // A turn ------------------------------------------------------------------
 
   private startTurn(id: string, label: string, approved: string[] = [], thenAskAgent = true): Job {
-    const paperId = this.vault.getAssistantSession(id).paperId;
+    const { paperId, temporary, origin } = this.vault.getAssistantSession(id);
     return this.deps.jobs.start(
-      { kind: 'assistant', paperId: paperId ?? ASSISTANT_OWNER, targetId: id, label: t('助手：{title}', { title: clip(label, 40) }) },
+      {
+        kind: 'assistant',
+        paperId: paperId ?? (temporary ? SEARCH_OWNER : ASSISTANT_OWNER),
+        targetId: id,
+        label: origin === 'search' ? t('Agent 搜索：{query}', { query: clip(label, 40) }) : t('助手：{title}', { title: clip(label, 40) }),
+      },
       async (ctx) => {
         await this.runActions(id, approved, ctx);
         if (thenAskAgent) await this.converse(id, ctx);
@@ -422,6 +484,7 @@ export class Assistant {
       // Read again each step, since the paper or its repository can change while the agent works.
       const paper = session.paperId ? this.deps.paperFor(session.paperId) : undefined;
       const repo = paper && !('missing' in paper) ? paper.repo : undefined;
+      const images = this.contextImages(session);
       const raw = await this.deps.runAgent({
         backend: session.harness,
         model: session.model || undefined,
@@ -431,7 +494,10 @@ export class Assistant {
           messages: session.messages,
           today: new Date().toISOString().slice(0, 10),
           paper,
+          imageNumbers: new Map(images.map((image, i) => [image.name, i + 1])),
+          search: session.origin === 'search',
         }),
+        images: images.map(({ path, mediaType }) => ({ path, mediaType })),
         onDelta: ctx.delta,
         signal: ctx.signal,
       });
@@ -464,6 +530,21 @@ export class Assistant {
       content: t('这一轮的步骤已达上限，已经先停下。可以回复“继续”接着做。'),
       error: true,
       at: new Date().toISOString(),
+    });
+  }
+
+  /** The latest images in the chat, oldest first, which is how the agent numbers them. Missing files are skipped. */
+  private contextImages(session: AssistantSession): { name: string; path: string; mediaType: string }[] {
+    const names = session.messages.flatMap((m) => m.images ?? []).slice(-MAX_CONTEXT_IMAGES);
+    return names.flatMap((name) => {
+      try {
+        const path = this.vault.assistantImagePath(session.id, name);
+        const ext = name.split('.').pop();
+        const mediaType = Object.entries(IMAGE_TYPES).find(([, e]) => e === ext)?.[0];
+        return mediaType ? [{ name, path, mediaType }] : [];
+      } catch {
+        return [];
+      }
     });
   }
 
@@ -1181,10 +1262,34 @@ function quoteOf(session: AssistantSession, { selection, page }: Quote): Pick<As
   return { selection: clip(selection.trim(), MAX_SELECTION_CHARS), ...(ok ? { page } : {}) };
 }
 
-function requireMessage(message: string): string {
+/** A message with images may have no words. */
+function requireMessage(message: string, hasImages = false): string {
   const text = message.trim();
-  if (!text) throw new BadRequest(t('问题不能为空'));
+  if (!text && !hasImages) throw new BadRequest(t('问题不能为空'));
   return text;
+}
+
+interface DecodedImage {
+  data: Buffer;
+  ext: string;
+}
+
+/** Images arrive as data URLs. All are checked before anything is stored, so a bad one changes nothing. */
+function readImages(value: unknown, harness: AgentBackend): DecodedImage[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) throw new BadRequest(t('请求无效'));
+  if (!value.length) return [];
+  if (value.length > MAX_MESSAGE_IMAGES) throw new BadRequest(t('一条消息最多附带 {count} 张图片', { count: MAX_MESSAGE_IMAGES }));
+  if (!IMAGE_BACKENDS.includes(harness)) throw new BadRequest(t('{agent} 不能读取图片', { agent: harness }));
+  return (value as string[]).map((url) => {
+    const match = /^data:(image\/[a-z]+);base64,([A-Za-z0-9+/=]+)$/.exec(url);
+    const ext = match && Object.hasOwn(IMAGE_TYPES, match[1]) ? IMAGE_TYPES[match[1]] : undefined;
+    if (!match || !ext) throw new BadRequest(t('只支持 PNG、JPEG、GIF 和 WebP 图片'));
+    const data = Buffer.from(match[2], 'base64');
+    if (!data.length) throw new BadRequest(t('只支持 PNG、JPEG、GIF 和 WebP 图片'));
+    if (data.length > MAX_IMAGE_BYTES) throw new BadRequest(t('图片太大了，最大 {size} MB', { size: MAX_IMAGE_BYTES / 1024 / 1024 }));
+    return { data, ext };
+  });
 }
 
 function pendingActions(session: AssistantSession): AssistantAction[] {
