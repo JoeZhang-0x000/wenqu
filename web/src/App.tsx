@@ -2,7 +2,6 @@ import { Loader2, Moon, Settings as SettingsIcon, Sun, X } from 'lucide-react';
 import { t } from '../../src/shared/i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AssistantSessionMeta, FontSize, UpdateStatus } from '../../src/shared/types';
-import { SEARCH_OWNER } from '../../src/shared/assistant';
 import { Assistant } from './Assistant';
 import { acceptsImageDrop, takeImageDrop } from './Attachments';
 import { api, confirmStore, connectEvents, fail, jobsStore, localeStore, refreshSettings, routeStore, settingsStore, toastStore, useFetch, useStore } from './lib';
@@ -148,8 +147,7 @@ function AssistantLink({ active }: { active: boolean }) {
   const { data: sessions } = useFetch<AssistantSessionMeta[]>('/assistant/sessions');
   const waiting = sessions?.find((s) => s.pending > 0);
   const jobs = useStore(jobsStore);
-  // An agent search shows its progress in the library, not here.
-  const working = Object.values(jobs).some((j) => j.kind === 'assistant' && j.status === 'running' && j.paperId !== SEARCH_OWNER);
+  const working = Object.values(jobs).some((j) => j.kind === 'assistant' && j.status === 'running');
   return (
     <a className={active ? 'on' : ''} href={waiting ? `#/assistant/${waiting.id}` : '#/assistant'} title={waiting ? t('有操作等待你批准') : undefined}>
       {t('助手')}

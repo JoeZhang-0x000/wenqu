@@ -584,16 +584,6 @@ export class Vault {
     if (existsSync(images)) this.moveToTrash(images, `assistant-${id}-images`);
   }
 
-  /**
-   * The one thing the app removes for good: an agent search the user never kept. It was never
-   * part of the library, and every search would otherwise leave a file in the trash.
-   */
-  dropTemporaryAssistantSession(id: string): void {
-    if (!this.getAssistantSession(id).temporary) throw new BadRequest(t('请求无效'));
-    rmSync(this.assistantPath(id), { force: true });
-    rmSync(this.assistantImagesDir(id), { recursive: true, force: true });
-  }
-
   /** Beside the chats rather than among them, so listing chats never meets a folder. */
   private assistantImagesDir(id: string) {
     return join(this.root, 'assistant-images', assertId(id));

@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { ASSISTANT_OWNER, SEARCH_OWNER, parseReply, withRepairedTags, withoutImaginedResults } from '../shared/assistant.js';
+import { ASSISTANT_OWNER, parseReply, withRepairedTags, withoutImaginedResults } from '../shared/assistant.js';
 import { t } from '../shared/i18n.js';
 import {
   BLOG_STYLES,
@@ -47,8 +47,6 @@ const MAX_SEARCH_RESULTS = 25;
 const MAX_SELECTION_CHARS = 4000;
 /** Earlier images beyond these are mentioned to the agent, but not shown again. */
 const MAX_CONTEXT_IMAGES = 8;
-/** An agent search left alone this long is thrown away. */
-const TEMPORARY_TTL_MS = 24 * 60 * 60_000;
 /** Generating is slow and each one runs an agent, so a batch runs a few at a time. */
 const GENERATION_CONCURRENCY = 3;
 
@@ -68,12 +66,6 @@ export interface AssistantDeps {
   paperFor(paperId: string): AssistantPaper;
   /** The paper's linked repository at its pinned commit, fetched again if the clone has gone. Throws if it can't be read. */
   repoReader(paperId: string, signal: AbortSignal): Promise<RepoReader>;
-}
-
-/** Where a chat starts: beside a paper, or as an agent search from the search bar. */
-export interface Scope {
-  paperId?: string;
-  temporary?: boolean;
 }
 
 /** Where a user's message in a chat beside a paper points into it. */
@@ -211,8 +203,7 @@ export class Assistant {
     const titles = new Map(this.vault.listPapers().map((p) => [p.id, p.title]));
     return this.vault
       .listAssistantSessions()
-      .filter((s) => !s.temporary || !this.dropIfStale(s))
-      .filter((s) => !s.temporary && (!filter.paperId || s.paperId === filter.paperId))
+      .filter((s) => !filter.paperId || s.paperId === filter.paperId)
       .map((stored) => {
         const session = this.settleInterrupted(stored);
         const { messages, allowReads: _allowReads, ...meta } = session;
@@ -267,21 +258,16 @@ export class Assistant {
     return next;
   }
 
-  /**
-   * A chat given a paper sits beside it: it sees that paper, and messages can quote it.
-   * A temporary one is an agent search, kept out of the list until the user keeps it.
-   */
-  create(message: string, harness: AgentBackend, model: string, thinking: string, scope: Scope & Quote = {}, images?: unknown) {
+  /** A chat given a paper sits beside it: it sees that paper, and messages can quote it. */
+  create(message: string, harness: AgentBackend, model: string, thinking: string, scope: { paperId?: string } & Quote = {}, images?: unknown) {
     const attached = readImages(images, harness);
     const text = requireMessage(message, attached.length > 0);
     if (scope.paperId) this.vault.getPaper(scope.paperId);
-    if (scope.paperId && scope.temporary) throw new BadRequest(t('请求无效'));
     const now = new Date().toISOString();
     const session: AssistantSession = {
       id: newOutputId(),
       title: clip(text.replace(/\s+/g, ' '), 60) || t('图片'),
       ...(scope.paperId ? { paperId: scope.paperId } : {}),
-      ...(scope.temporary ? { temporary: true, origin: 'search' as const } : {}),
       harness,
       model,
       thinking,
@@ -316,28 +302,7 @@ export class Assistant {
     return this.vault.assistantImagePath(id, name);
   }
 
-  /** An agent search becomes an ordinary chat, listed with the others. */
-  keep(id: string): AssistantSession {
-    this.mutate(id, (session) => {
-      delete session.temporary;
-    });
-    this.deps.jobs.send({ type: 'library' });
-    return this.get(id);
-  }
 
-  /** Stopped first, so nothing writes to it once it's gone. */
-  private async discardSearch(id: string): Promise<void> {
-    this.deps.jobs.cancelTarget(id);
-    await this.deps.jobs.settled(id);
-    this.vault.dropTemporaryAssistantSession(id);
-  }
-
-  /** A search nobody kept and nothing is running in. Returns whether it was dropped. */
-  private dropIfStale(session: AssistantSession): boolean {
-    if (Date.now() - Date.parse(session.updatedAt) < TEMPORARY_TTL_MS || this.deps.jobs.isActive(session.id)) return false;
-    this.vault.dropTemporaryAssistantSession(session.id);
-    return true;
-  }
 
   /**
    * Decides only the actions named, so other cards keep waiting and nothing is approved by omission.
@@ -407,9 +372,7 @@ export class Assistant {
     return this.get(id);
   }
 
-  /** A chat goes to the trash. A search that was never kept is thrown away, even while it's answering. */
-  remove(id: string): Promise<void> | void {
-    if (this.vault.getAssistantSession(id).temporary) return this.discardSearch(id);
+  remove(id: string): void {
     this.assertIdle(id);
     this.vault.trashAssistantSession(id);
     this.deps.jobs.send({ type: 'library' });
@@ -448,14 +411,9 @@ export class Assistant {
   // A turn ------------------------------------------------------------------
 
   private startTurn(id: string, label: string, approved: string[] = [], thenAskAgent = true): Job {
-    const { paperId, temporary, origin } = this.vault.getAssistantSession(id);
+    const paperId = this.vault.getAssistantSession(id).paperId;
     return this.deps.jobs.start(
-      {
-        kind: 'assistant',
-        paperId: paperId ?? (temporary ? SEARCH_OWNER : ASSISTANT_OWNER),
-        targetId: id,
-        label: origin === 'search' ? t('Agent 搜索：{query}', { query: clip(label, 40) }) : t('助手：{title}', { title: clip(label, 40) }),
-      },
+      { kind: 'assistant', paperId: paperId ?? ASSISTANT_OWNER, targetId: id, label: t('助手：{title}', { title: clip(label, 40) }) },
       async (ctx) => {
         await this.runActions(id, approved, ctx);
         if (thenAskAgent) await this.converse(id, ctx);
@@ -495,7 +453,6 @@ export class Assistant {
           today: new Date().toISOString().slice(0, 10),
           paper,
           imageNumbers: new Map(images.map((image, i) => [image.name, i + 1])),
-          search: session.origin === 'search',
         }),
         images: images.map(({ path, mediaType }) => ({ path, mediaType })),
         onDelta: ctx.delta,

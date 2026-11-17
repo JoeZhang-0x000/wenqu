@@ -236,28 +236,6 @@ input[type='range'] { width: 100%; accent-color: var(--signal); }
   width: 40px; height: 40px; border-radius: 50%; background: var(--signal); color: var(--signal-ink);
 }
 .omnibox-go:disabled { opacity: 0.35; cursor: default; }
-.search-page .omnibox-wrap { margin-bottom: 26px; }
-
-/* An agent search: one question, answered like an assistant chat, folded once it's long. */
-.search-view { max-width: 820px; margin: 0 auto; }
-.search-label { margin: 0 0 12px; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); }
-.overview { margin-bottom: 36px; }
-.overview-flow { position: relative; display: flex; flex-direction: column; gap: 14px; font-size: 1.0625rem; line-height: 1.75; }
-.overview-flow.folded { overflow: hidden; }
-.overview-flow.folded::after {
-  content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 140px; pointer-events: none;
-  background: linear-gradient(to bottom, transparent, var(--paper) 78%);
-}
-.overview-tools { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 14px 0 6px; }
-.overview-flow.folded .overview-tools { position: absolute; z-index: 1; left: 0; right: 0; bottom: 8px; margin: 0; }
-.overview-more, .overview-keep {
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 40px;
-  border: 1px solid var(--line-2); border-radius: 99px; background: var(--paper-2); color: var(--ink); box-shadow: var(--shadow);
-}
-.overview-more, .overview-keep { padding: 0 18px; font-weight: 600; font-size: 0.9375rem; }
-.overview-more:hover, .overview-keep:hover:not(:disabled) { border-color: var(--ink-3); }
-.overview-keep:disabled { opacity: 0.5; }
-
 /* Images going with a message, and the ones already sent. */
 .attachments { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 6px; }
 .attachment { position: relative; width: 56px; height: 56px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); }

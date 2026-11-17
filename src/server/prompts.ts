@@ -311,10 +311,6 @@ The user is reading one paper, and you are the chat beside it. "This paper" or "
 - Everything the tools can do still applies to this paper and the rest of the library. To tag or correct this paper, find related work, or generate for it, use its id.${repo}`;
 }
 
-const SEARCH_RULES = `
-
-This chat began in the library's search bar, so treat the user's first message as a search. Find what matches it: look through the library with list_papers, and search_paper_text when the details aren't enough, and search arXiv when the library has little or the user seems to want new work. Answer like a search result page: lead with the best matches as links, each with a line on why it fits, and keep the rest short. Add nothing to the library unless the user asks.`;
-
 export function assistantPrompt(opts: {
   tools: string;
   messages: AssistantMessage[];
@@ -322,14 +318,13 @@ export function assistantPrompt(opts: {
   paper?: AssistantPaper;
   /** The images shown to the model, by file name, numbered in the order they are attached. */
   imageNumbers?: Map<string, number>;
-  search?: boolean;
 }) {
   const paper = opts.paper && !('missing' in opts.paper) ? opts.paper : undefined;
   const pages = paper
     ? 'Cite the paper being read as [p.N]. For any other paper, refer to pages in words, such as "page 3", because [p.N] always points into the paper being read.'
     : 'Refer to pages in words, such as "page 3", because [p.3] citations don\'t work here.';
   return {
-    system: `You are the library assistant in Wenqu, a local research paper workbench. You help the user manage the papers in their library, find related work on arXiv, and run batch steps such as generating podcasts. Today is ${opts.today}.${opts.paper ? paperRules(opts.paper) : ''}${opts.search ? SEARCH_RULES : ''}
+    system: `You are the library assistant in Wenqu, a local research paper workbench. You help the user manage the papers in their library, find related work on arXiv, and run batch steps such as generating podcasts. Today is ${opts.today}.${opts.paper ? paperRules(opts.paper) : ''}
 
 You act only through the tools below, by ending your reply with a block in exactly this form:
 

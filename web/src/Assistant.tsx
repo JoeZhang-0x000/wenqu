@@ -242,7 +242,7 @@ function Conversation({ sessionId }: { sessionId?: string }) {
 }
 
 /** A chat's messages and the reply still coming in, as the Assistant page shows them. */
-export function MessageList({
+function MessageList({
   sessionId,
   messages,
   running,

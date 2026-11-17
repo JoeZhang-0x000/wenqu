@@ -3,8 +3,7 @@ import { getLocale, t } from '../../src/shared/i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { countTags, type PaperSummary } from '../../src/shared/types';
 import { openAddPaper } from './AddPaper';
-import { AgentSearchView, agentSearchStore, closeAgentSearch, startAgentSearch } from './AgentSearch';
-import { api, fail, paperHref, useFetch, useStore } from './lib';
+import { api, fail, paperHref, settingsStore, useFetch } from './lib';
 import { coverUrl, requestCover } from './cover';
 
 const VERSE = '问渠哪得清如许？为有源头活水来。';
@@ -52,7 +51,7 @@ function saveView(view: View) {
   }
 }
 
-/** Agent search asks the default harness, which looks through the library and arXiv. Plain search filters the shelf as you type. */
+/** Agent search opens a new assistant chat with the question. Plain search filters the shelf as you type. */
 type SearchMode = 'agent' | 'plain';
 const MODE_KEY = 'wenqu-search-mode';
 
@@ -64,20 +63,16 @@ function savedMode(): SearchMode {
   }
 }
 
-function Omnibox({
-  text,
-  onText,
-  mode,
-  onMode,
-  searching,
-}: {
-  text: string;
-  onText(text: string): void;
-  mode: SearchMode;
-  onMode(mode: SearchMode): void;
-  /** An agent search is on the page, which the clear button closes. */
-  searching: boolean;
-}) {
+/** The question goes to the default harness, with its model and thinking level, as on the Assistant page. */
+async function askAssistant(question: string): Promise<void> {
+  const agent = settingsStore.get()!.agent;
+  const { sessionId } = await api<{ sessionId: string }>('/assistant/sessions', {
+    body: { message: question, harness: agent.backend, model: agent.models[agent.backend], thinking: agent.thinking[agent.backend] },
+  });
+  location.hash = `#/assistant/${sessionId}`;
+}
+
+function Omnibox({ text, onText, mode, onMode }: { text: string; onText(text: string): void; mode: SearchMode; onMode(mode: SearchMode): void }) {
   const input = useRef<HTMLInputElement>(null);
   const [starting, setStarting] = useState(false);
 
@@ -97,10 +92,9 @@ function Omnibox({
     if (mode !== 'agent' || !text.trim() || starting) return;
     setStarting(true);
     try {
-      await startAgentSearch(text.trim());
+      await askAssistant(text.trim());
     } catch (err) {
       fail(err);
-    } finally {
       setStarting(false);
     }
   };
@@ -140,21 +134,20 @@ function Omnibox({
         <input
           ref={input}
           aria-label={mode === 'agent' ? t('Agent 搜索') : t('搜索书架')}
-          placeholder={mode === 'agent' ? t('描述你想找的论文，Agent 会翻遍书架和 arXiv') : t('搜索标题、作者、摘要')}
+          placeholder={mode === 'agent' ? t('问问助手，比如帮我找某个方向的论文') : t('搜索标题、作者、摘要')}
           value={text}
           onChange={(e) => onText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Escape') onText('');
           }}
         />
-        {(text || searching) && (
+        {text && (
           <button
             type="button"
             className="icon omnibox-clear"
-            title={searching ? t('关闭并丢弃') : t('清空')}
-            aria-label={searching ? t('关闭并丢弃') : t('清空')}
+            title={t('清空')}
+            aria-label={t('清空')}
             onClick={() => {
-              if (searching) closeAgentSearch();
               onText('');
               input.current?.focus();
             }}
@@ -184,10 +177,8 @@ export function Library() {
       /* The choice just lasts until the next load. */
     }
   };
-  // Only plain search filters the shelf. An agent search takes over the page instead.
+  // Only plain search filters the shelf. An agent search goes to the assistant instead.
   const query = mode === 'plain' ? text : '';
-  const searchId = useStore(agentSearchStore);
-  const searching = mode === 'agent' && searchId ? searchId : null;
   const [filter, setFilter] = useState<Filter>('all');
   const [view, setView] = useState<View>(savedView);
   const [chosenTags, setChosenTags] = useState<string[]>([]);
@@ -221,20 +212,7 @@ export function Library() {
   // The ones in use stay in the row, wherever they rank.
   const shownTags = allTagsShown ? tagCounts : tagCounts.filter((c, i) => i < TAGS_SHOWN || activeTags.includes(c.tag));
 
-  const omnibox = <Omnibox text={text} onText={setText} mode={mode} onMode={setMode} searching={Boolean(searching)} />;
-
-  if (searching) {
-    return (
-      <div className="page search-page">
-        {omnibox}
-        <AgentSearchView
-          key={searching}
-          sessionId={searching}
-          onQuery={(question) => setText((current) => current || question)}
-        />
-      </div>
-    );
-  }
+  const omnibox = <Omnibox text={text} onText={setText} mode={mode} onMode={setMode} />;
 
   if (papers && !papers.length) {
     return (

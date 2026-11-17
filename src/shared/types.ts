@@ -480,13 +480,6 @@ export interface AssistantSessionMeta {
   harness: AgentBackend;
   model: string;
   thinking: string;
-  /**
-   * An agent search from the search bar. It isn't listed with the chats, and is thrown away
-   * unless the user keeps it, which turns it into an ordinary chat.
-   */
-  temporary?: boolean;
-  /** Where the first message came from. A search is answered as one, even once it's kept. */
-  origin?: 'search';
   messageCount: number;
   /** Actions waiting for the user. */
   pending: number;

@@ -607,19 +607,12 @@ const en = {
 
   // Agent search
   'Agent 搜索': 'Agent search',
-  'Agent 搜索：{query}': 'Agent search: {query}',
-  '{agent} 正在搜索': '{agent} is searching',
-  关闭并丢弃: 'Close and discard',
   常规: 'Plain',
   搜索: 'Search',
   搜索书架: 'Search the library',
   搜索方式: 'Search mode',
   清空: 'Clear',
-  'AI 概览': 'AI overview',
-  展开: 'Show more',
-  在助手中继续: 'Continue in Assistant',
-  '保存为助手里的会话，在那里接着问': 'Save it as an Assistant chat and keep asking there',
-  '描述你想找的论文，Agent 会翻遍书架和 arXiv': 'Describe the papers you\'re looking for',
+  '问问助手，比如帮我找某个方向的论文': 'Ask the assistant, such as to find papers on a topic',
 } as const;
 
 export type Locale = 'zh' | 'en';

@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -1192,57 +1192,6 @@ describe('Assistant', () => {
       const name = assistant.get(sessionId).messages[0].images![0];
       assistant.remove(sessionId);
       expect(() => assistant.imagePath(sessionId, name)).toThrow();
-    });
-  });
-
-  describe('agent search', () => {
-    it('is answered as a search, and kept out of the list until kept', async () => {
-      say('Found two.');
-      const { sessionId } = assistant.create('graph transformers', 'claude', '', '', { temporary: true });
-      expect(jobs.list().find((j) => j.targetId === sessionId)?.paperId).toBe('agent-search');
-      await idle(sessionId);
-      expect(requests[0].system).toContain("library's search bar");
-      expect(assistant.list()).toEqual([]);
-      expect(assistant.get(sessionId).temporary).toBe(true);
-
-      assistant.keep(sessionId);
-      expect(assistant.list().map((s) => s.id)).toEqual([sessionId]);
-      say('More.');
-      assistant.send(sessionId, 'more');
-      await idle(sessionId);
-      // Still answered as a search, but now an ordinary chat in every other way.
-      expect(requests[1].system).toContain("library's search bar");
-      expect(jobs.list().at(-1)?.paperId).toBe('assistant');
-    });
-
-    it('is thrown away rather than trashed, even while answering', async () => {
-      let asked = false;
-      // Like a real agent, it stops when told to.
-      say((req) => {
-        asked = true;
-        return new Promise<string>((_resolve, reject) => req.signal?.addEventListener('abort', () => reject(new Error('stopped'))));
-      });
-      const { sessionId } = assistant.create('x', 'claude', '', '', { temporary: true });
-      await vi.waitFor(() => expect(asked).toBe(true));
-      await assistant.remove(sessionId);
-      expect(() => assistant.get(sessionId)).toThrow();
-      expect(existsSync(join(root, '.trash'))).toBe(false);
-    });
-
-    it('clears out searches left alone for a day', async () => {
-      say('Old.', 'New.');
-      const old = await (async () => {
-        const { sessionId } = assistant.create('old', 'claude', '', '', { temporary: true });
-        await idle(sessionId);
-        return sessionId;
-      })();
-      const session = vault.getAssistantSession(old);
-      vault.saveAssistantSession({ ...session, updatedAt: new Date(Date.now() - 25 * 60 * 60_000).toISOString() });
-      const { sessionId: fresh } = assistant.create('new', 'claude', '', '', { temporary: true });
-      await idle(fresh);
-      assistant.list();
-      expect(() => assistant.get(old)).toThrow();
-      expect(assistant.get(fresh).temporary).toBe(true);
     });
   });
 });
