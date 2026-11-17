@@ -238,7 +238,7 @@ input[type='range'] { width: 100%; accent-color: var(--signal); }
 .omnibox-go:disabled { opacity: 0.35; cursor: default; }
 .search-page .omnibox-wrap { margin-bottom: 26px; }
 
-/* An agent search: an overview that reads like a search result, the conversation after it, then what it found. */
+/* An agent search: one question, answered like an assistant chat, folded once it's long. */
 .search-view { max-width: 820px; margin: 0 auto; }
 .search-label { margin: 0 0 12px; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); }
 .overview { margin-bottom: 36px; }
@@ -254,25 +254,9 @@ input[type='range'] { width: 100%; accent-color: var(--signal); }
   display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 40px;
   border: 1px solid var(--line-2); border-radius: 99px; background: var(--paper-2); color: var(--ink); box-shadow: var(--shadow);
 }
-.overview-more { padding: 0 18px; font-weight: 600; font-size: 0.9375rem; }
-.overview-keep { position: relative; width: 40px; }
+.overview-more, .overview-keep { padding: 0 18px; font-weight: 600; font-size: 0.9375rem; }
 .overview-more:hover, .overview-keep:hover:not(:disabled) { border-color: var(--ink-3); }
 .overview-keep:disabled { opacity: 0.5; }
-.overview-keep[data-tip]:hover::after, .overview-keep[data-tip]:focus-visible::after {
-  content: attr(data-tip); position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
-  padding: 6px 10px; border-radius: 6px; background: var(--ink); color: var(--paper); font-size: 0.8125rem; white-space: nowrap; pointer-events: none;
-}
-.overview .next-steps { justify-content: center; margin-top: 4px; }
-.followup {
-  display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 6px 6px 6px 16px;
-  border: 1px solid var(--line-2); border-radius: 99px; background: var(--paper-2);
-}
-.followup:focus-within { border-color: var(--ink-3); }
-.followup input { flex: 1; min-width: 0; border: 0; background: transparent; padding: 6px 0; color: var(--ink); }
-.followup input:focus-visible { outline: none; }
-.followup .send { border-radius: 50%; width: 32px; height: 32px; }
-.search-sub { margin: 18px 0 10px; font-size: 0.875rem; font-weight: 600; color: var(--ink-2); }
-.search-hits { list-style: none; margin: 0; padding: 0; }
 
 /* Images going with a message, and the ones already sent. */
 .attachments { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 6px; }

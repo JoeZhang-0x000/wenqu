@@ -1,13 +1,10 @@
-import { ArrowUp, Bot, ChevronDown, ChevronUp, Square } from 'lucide-react';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { latestSuggestions, visibleRepoReply } from '../../src/shared/assistant';
+import { Bot, ChevronDown, ChevronUp } from 'lucide-react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { t } from '../../src/shared/i18n';
 import type { AssistantSession, Job } from '../../src/shared/types';
-import { Actions } from './Assistant';
+import { MessageList } from './Assistant';
 import { Thinking } from './ChatPanel';
 import { api, bumpLibrary, createStore, fail, jobsStore, useFetch, useStore } from './lib';
-import { Markdown } from './Markdown';
-import { MessageChips } from './ui';
 
 const SAVED_KEY = 'wenqu-agent-search';
 /** Taller than this, a finished overview is folded until the user asks for the rest. */
@@ -56,19 +53,10 @@ export function closeAgentSearch() {
 }
 
 /**
- * The page an agent search turns the library into: an overview that reads like a search result,
- * the conversation that follows from it, and the papers it found.
+ * An agent search is an assistant chat with a single question: the same replies, actions and
+ * approval cards, without a box to ask more. Continuing it moves it to the Assistant page.
  */
-export function AgentSearchView({
-  sessionId,
-  onQuery,
-  renderResults,
-}: {
-  sessionId: string;
-  /** The question this search was asked with, for the search bar to show. */
-  onQuery(query: string): void;
-  renderResults(session: AssistantSession | undefined, running: boolean): ReactNode;
-}) {
+export function AgentSearchView({ sessionId, onQuery }: { sessionId: string; onQuery(query: string): void }) {
   const { data: session, error, setData: setSession } = useFetch<AssistantSession>(`/assistant/sessions/${sessionId}`);
   const jobs = useStore(jobsStore);
   const running: Job | undefined = useMemo(
@@ -76,20 +64,13 @@ export function AgentSearchView({
     [jobs, sessionId],
   );
   const [keeping, setKeeping] = useState(false);
-  const [answered, setAnswered] = useState<string>();
-  const [input, setInput] = useState('');
   const [expanded, setExpanded] = useState(false);
   const [tall, setTall] = useState(false);
   const flowRef = useRef<HTMLDivElement>(null);
   const messages = session?.messages ?? [];
-  const suggestions = latestSuggestions(messages, Boolean(running) || answered === messages.at(-1)?.at);
-  const streamed = running ? visibleRepoReply(running.text) : '';
-  // The first message is the question, which the search bar shows.
-  const flow = messages.slice(1);
-  const followedUp = flow.some((m) => m.role === 'user');
-  const waiting = flow.some((m) => m.actions?.some((a) => a.status === 'pending'));
-  // A conversation, an answer still coming in or a card waiting for the user is never folded away.
-  const folded = tall && !expanded && !running && !followedUp && !waiting;
+  const waiting = messages.some((m) => m.actions?.some((a) => a.status === 'pending'));
+  // An answer still coming in, or a card waiting for the user, is never folded away.
+  const folded = tall && !expanded && !running && !waiting;
 
   // A search kept from another tab, or cleared out as stale, has nothing left to show here.
   useEffect(() => {
@@ -110,21 +91,6 @@ export function AgentSearchView({
     return () => observer.disconnect();
   }, [session]);
 
-  const followUp = async (text: string, fromChip = false) => {
-    if (!text.trim() || running) return;
-    if (!fromChip) setInput('');
-    setAnswered(messages.at(-1)?.at);
-    setExpanded(true);
-    try {
-      await api(`/assistant/sessions/${sessionId}/messages`, { body: { message: text } });
-      bumpLibrary();
-    } catch (err) {
-      if (!fromChip) setInput(text);
-      setAnswered(undefined);
-      fail(err);
-    }
-  };
-
   const keep = async () => {
     setKeeping(true);
     try {
@@ -140,62 +106,29 @@ export function AgentSearchView({
 
   const tools = (
     <div className="overview-tools">
-      {tall && !followedUp && !waiting && !running && (
+      {tall && !waiting && !running && (
         <button className="overview-more" onClick={() => setExpanded(!expanded)}>
           {folded ? t('展开') : t('收起')}
           {folded ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
         </button>
       )}
-      <button className="overview-keep" disabled={!session || keeping} data-tip={t('在助手中继续')} aria-label={t('在助手中继续')} onClick={keep}>
-        <Bot size={17} />
+      <button className="overview-keep" disabled={!session || keeping} title={t('保存为助手里的会话，在那里接着问')} onClick={keep}>
+        <Bot size={16} />
+        {t('在助手中继续')}
       </button>
     </div>
   );
 
   return (
-    <div className="search-view">
-      <section className="overview" aria-label={t('AI 概览')} aria-busy={Boolean(running)}>
-        <h2 className="search-label">{t('AI 概览')}</h2>
-        <div className={`overview-flow ${folded ? 'folded' : ''}`} ref={flowRef} style={folded ? { maxHeight: FOLDED_HEIGHT } : undefined}>
-          {flow.map((m, i) =>
-            m.role === 'user' ? (
-              <div className="msg user" key={i}>{m.content}</div>
-            ) : (
-              <div className={`msg ai ${m.error ? 'err' : ''}`} key={i}>
-                {m.error ? <p>{m.content}</p> : m.content && <Markdown source={m.content} repo={m.repo} />}
-                {m.actions && <Actions sessionId={sessionId} actions={m.actions} locked={Boolean(running)} onSession={setSession} />}
-              </div>
-            ),
-          )}
-          {(running || !session) && (
-            <div className="msg ai">
-              {streamed ? <Markdown source={streamed} /> : <Thinking text={running?.progress?.note ?? t('{agent} 正在搜索', { agent: session?.harness ?? 'AI' })} />}
-            </div>
-          )}
-          {folded && tools}
-        </div>
-        {!folded && tools}
-        <MessageChips className="next-steps" label={t('接下来可以问')} items={suggestions} onPick={(s) => void followUp(s, true)} />
-        <form
-          className="followup"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void followUp(input);
-          }}
-        >
-          <input aria-label={t('追问')} placeholder={t('追问')} value={input} onChange={(e) => setInput(e.target.value)} />
-          {running ? (
-            <button type="button" className="send" title={t('停止')} onClick={() => api(`/jobs/${running.id}/cancel`, { method: 'POST' }).catch(fail)}>
-              <Square size={13} fill="currentColor" />
-            </button>
-          ) : (
-            <button type="submit" className="send" title={t('发送')} disabled={!input.trim() || !session}>
-              <ArrowUp size={16} />
-            </button>
-          )}
-        </form>
-      </section>
-      {renderResults(session, Boolean(running))}
-    </div>
+    <section className="search-view overview" aria-label={t('AI 概览')} aria-busy={Boolean(running)}>
+      <h2 className="search-label">{t('AI 概览')}</h2>
+      <div className={`overview-flow ${folded ? 'folded' : ''}`} ref={flowRef} style={folded ? { maxHeight: FOLDED_HEIGHT } : undefined}>
+        {/* The question is in the search bar. */}
+        <MessageList sessionId={sessionId} messages={messages.slice(1)} running={running} harness={session?.harness} onSession={setSession} />
+        {!session && <Thinking text={t('{agent} 正在搜索', { agent: 'AI' })} />}
+        {folded && tools}
+      </div>
+      {!folded && tools}
+    </section>
   );
 }

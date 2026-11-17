@@ -2,7 +2,7 @@ import { ArrowUp, Ban, BookOpen, Check, ChevronRight, CircleAlert, Loader2, Mess
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { latestSuggestions, visibleRepoReply } from '../../src/shared/assistant';
 import { t } from '../../src/shared/i18n';
-import type { AgentBackend, ArxivHit, AssistantAction, AssistantSession, AssistantSessionMeta, Job, PaperSummary } from '../../src/shared/types';
+import type { AgentBackend, ArxivHit, AssistantAction, AssistantMessage, AssistantSession, AssistantSessionMeta, Job, PaperSummary } from '../../src/shared/types';
 import { AttachButton, AttachmentStrip, MessageImages, useAttachments } from './Attachments';
 import { EffortSelect, HarnessPicker, ModelSelect, Thinking, effortsOf } from './ChatPanel';
 import { agentsStore, api, bumpLibrary, confirmAction, fail, formatDate, goTo, jobsStore, loadAgents, ownerHref, paperHref, settingsStore, toast, useFetch, useStore } from './lib';
@@ -169,34 +169,7 @@ function Conversation({ sessionId }: { sessionId?: string }) {
               <span className="ellipsis">{t('这个会话在论文旁边开始：{title}', { title: session?.paperTitle ?? paperId })}</span>
             </a>
           )}
-          {messages.map((m, i) =>
-            m.role === 'user' ? (
-              <div className="msg user" key={i}>
-                {m.selection && (
-                  <blockquote className="quote" onClick={() => m.page && onCite?.(m.page)}>
-                    {m.page && <span className="mono">p.{m.page}</span>} {m.selection}
-                  </blockquote>
-                )}
-                {sessionId && <MessageImages sessionId={sessionId} images={m.images} />}
-                {m.content && <div>{m.content}</div>}
-              </div>
-            ) : (
-              <div className={`msg ai ${m.error ? 'err' : ''}`} key={i}>
-                {m.error ? <p>{m.content}</p> : m.content && <Markdown source={m.content} onCite={onCite} repo={m.repo} />}
-                {m.actions && sessionId && <Actions sessionId={sessionId} actions={m.actions} locked={Boolean(running)} onSession={setSession} />}
-                {m.agent && <div className="msg-agent mono">{m.agent}</div>}
-              </div>
-            ),
-          )}
-          {running && (
-            <div className="msg ai">
-              {streamed ? (
-                <Markdown source={streamed} onCite={onCite} />
-              ) : (
-                <Thinking text={running.progress?.note ?? t('{agent} 正在思考', { agent: harness ?? 'AI' })} />
-              )}
-            </div>
-          )}
+          {sessionId && <MessageList sessionId={sessionId} messages={messages} running={running} harness={harness} onCite={onCite} onSession={setSession} />}
           <MessageChips className="next-steps" label={t('接下来可以问')} items={suggestions} onPick={(s) => send(s, true)} />
         </div>
       </div>
@@ -265,6 +238,53 @@ function Conversation({ sessionId }: { sessionId?: string }) {
         </div>
       </div>
     </section>
+  );
+}
+
+/** A chat's messages and the reply still coming in, as the Assistant page shows them. */
+export function MessageList({
+  sessionId,
+  messages,
+  running,
+  harness,
+  onCite,
+  onSession,
+}: {
+  sessionId: string;
+  messages: AssistantMessage[];
+  running?: Job;
+  harness?: string;
+  onCite?(page: number): void;
+  onSession(session: AssistantSession): void;
+}) {
+  const streamed = running ? visibleRepoReply(running.text) : '';
+  return (
+    <>
+      {messages.map((m, i) =>
+        m.role === 'user' ? (
+          <div className="msg user" key={i}>
+            {m.selection && (
+              <blockquote className="quote" onClick={() => m.page && onCite?.(m.page)}>
+                {m.page && <span className="mono">p.{m.page}</span>} {m.selection}
+              </blockquote>
+            )}
+            <MessageImages sessionId={sessionId} images={m.images} />
+            {m.content && <div>{m.content}</div>}
+          </div>
+        ) : (
+          <div className={`msg ai ${m.error ? 'err' : ''}`} key={i}>
+            {m.error ? <p>{m.content}</p> : m.content && <Markdown source={m.content} onCite={onCite} repo={m.repo} />}
+            {m.actions && <Actions sessionId={sessionId} actions={m.actions} locked={Boolean(running)} onSession={onSession} />}
+            {m.agent && <div className="msg-agent mono">{m.agent}</div>}
+          </div>
+        ),
+      )}
+      {running && (
+        <div className="msg ai">
+          {streamed ? <Markdown source={streamed} onCite={onCite} /> : <Thinking text={running.progress?.note ?? t('{agent} 正在思考', { agent: harness ?? 'AI' })} />}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -438,7 +458,7 @@ function ActionRow({ action, locked, onRetry }: { action: AssistantAction; locke
 }
 
 /** Clicking here is the user acting directly, so unlike the assistant's own requests it needs no approval step. */
-export function Hit({ hit }: { hit: ArxivHit }) {
+function Hit({ hit }: { hit: ArxivHit }) {
   const [added, setAdded] = useState<string>();
   const paperId = added ?? hit.paperId;
   const [busy, setBusy] = useState(false);

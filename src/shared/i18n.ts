@@ -618,12 +618,7 @@ const en = {
   'AI 概览': 'AI overview',
   展开: 'Show more',
   在助手中继续: 'Continue in Assistant',
-  追问: 'Ask a follow-up',
-  搜索结果: 'Search results',
-  书架里: 'In your library',
-  'arXiv 上': 'On arXiv',
-  '正在找……': 'Looking…',
-  '没有找到相关论文。': 'No related papers found.',
+  '保存为助手里的会话，在那里接着问': 'Save it as an Assistant chat and keep asking there',
   '描述你想找的论文，Agent 会翻遍书架和 arXiv': 'Describe the papers you\'re looking for',
 } as const;
 

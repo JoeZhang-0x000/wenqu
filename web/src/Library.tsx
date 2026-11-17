@@ -1,10 +1,9 @@
 import { ArrowRight, AudioLines, Check, FileText, Layers, LayoutGrid, Link2, Loader2, Plus, Rows3, Search, Sparkles, Tag, Upload, X } from 'lucide-react';
 import { getLocale, t } from '../../src/shared/i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { countTags, type AssistantSession, type PaperSummary } from '../../src/shared/types';
+import { countTags, type PaperSummary } from '../../src/shared/types';
 import { openAddPaper } from './AddPaper';
 import { AgentSearchView, agentSearchStore, closeAgentSearch, startAgentSearch } from './AgentSearch';
-import { Hit } from './Assistant';
 import { api, fail, paperHref, useFetch, useStore } from './lib';
 import { coverUrl, requestCover } from './cover';
 
@@ -232,7 +231,6 @@ export function Library() {
           key={searching}
           sessionId={searching}
           onQuery={(question) => setText((current) => current || question)}
-          renderResults={(session, running) => <SearchResults session={session} running={running} papers={papers ?? []} />}
         />
       </div>
     );
@@ -366,52 +364,6 @@ export function Library() {
         </div>
       )}
     </div>
-  );
-}
-
-const PAPER_LINK = /#\/paper\/([a-z0-9][a-z0-9-]*)/g;
-
-/**
- * What an agent search found: the library papers its answers link to, in the order they come up,
- * then what it turned up on arXiv that isn't in the library yet.
- */
-function SearchResults({ session, running, papers }: { session?: AssistantSession; running: boolean; papers: PaperSummary[] }) {
-  const messages = session?.messages ?? [];
-  const byId = new Map(papers.map((p) => [p.id, p]));
-  const linked = [
-    ...new Set(messages.filter((m) => m.role === 'assistant').flatMap((m) => [...m.content.matchAll(PAPER_LINK)].map((match) => match[1]))),
-  ].flatMap((id) => byId.get(id) ?? []);
-  const hits = [
-    ...new Map(
-      messages
-        .flatMap((m) => m.actions ?? [])
-        .flatMap((a) => a.hits ?? [])
-        .filter((hit) => !hit.paperId || !byId.has(hit.paperId))
-        .map((hit) => [hit.arxivId, hit]),
-    ).values(),
-  ];
-  if (!session) return null;
-  return (
-    <section className="search-results" aria-label={t('搜索结果')}>
-      <h2 className="search-label">{t('搜索结果')}</h2>
-      {linked.length > 0 && (
-        <>
-          <h3 className="search-sub">{t('书架里')}</h3>
-          <div className="shelf feed">
-            {linked.map((p) => <PaperCard key={p.id} paper={p} view="feed" activeTags={[]} onTag={() => {}} onToggle={() => {}} />)}
-          </div>
-        </>
-      )}
-      {hits.length > 0 && (
-        <>
-          <h3 className="search-sub">{t('arXiv 上')}</h3>
-          <ul className="search-hits">
-            {hits.map((hit) => <Hit key={hit.arxivId} hit={hit} />)}
-          </ul>
-        </>
-      )}
-      {!linked.length && !hits.length && <p className="muted">{running ? t('正在找……') : t('没有找到相关论文。')}</p>}
-    </section>
   );
 }
 
